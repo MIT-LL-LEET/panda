@@ -203,6 +203,29 @@ DEF(qemu_ld_i64, DATA64_ARGS, TLADDR_ARGS, 1,
 DEF(qemu_st_i64, 0, TLADDR_ARGS + DATA64_ARGS, 1,
     TCG_OPF_CALL_CLOBBER | TCG_OPF_SIDE_EFFECTS | TCG_OPF_64BIT)
 
+/*
+PANDA Specific TCG ops
+DEF(                   name,       oargs,                     iargs, cargs, flags)
+DEF(            qemu_ld_i32,           1,               TLADDR_ARGS,     1, TCG_OPF_CALL_CLOBBER | TCG_OPF_SIDE_EFFECTS)
+DEF(            qemu_st_i32,           0,           TLADDR_ARGS + 1,     1, TCG_OPF_CALL_CLOBBER | TCG_OPF_SIDE_EFFECTS)
+DEF(            qemu_ld_i64, DATA64_ARGS,               TLADDR_ARGS,     1, TCG_OPF_CALL_CLOBBER | TCG_OPF_SIDE_EFFECTS | TCG_OPF_64BIT)
+DEF(            qemu_st_i64,           0, TLADDR_ARGS + DATA64_ARGS,     1, TCG_OPF_CALL_CLOBBER | TCG_OPF_SIDE_EFFECTS | TCG_OPF_64BIT)
+*/
+/*
+	Versions that have input arguments euqal to:
+		before_*: the original inputs
+		after_*: inputs _and_ outputs in the normal op (as inputs to this)
+*/
+DEF(panda_before_mmu_ld_i32,           0,               TLADDR_ARGS,     1, TCG_OPF_CALL_CLOBBER | TCG_OPF_SIDE_EFFECTS)
+DEF(panda_before_mmu_st_i32,           0,           TLADDR_ARGS + 1,     1, TCG_OPF_CALL_CLOBBER | TCG_OPF_SIDE_EFFECTS)
+DEF(panda_before_mmu_ld_i64,           0,               TLADDR_ARGS,     1, TCG_OPF_CALL_CLOBBER | TCG_OPF_SIDE_EFFECTS | TCG_OPF_64BIT)
+DEF(panda_before_mmu_st_i64,           0, TLADDR_ARGS + DATA64_ARGS,     1, TCG_OPF_CALL_CLOBBER | TCG_OPF_SIDE_EFFECTS | TCG_OPF_64BIT)
+
+DEF( panda_after_mmu_ld_i32,           0,           TLADDR_ARGS + 1,     1, TCG_OPF_CALL_CLOBBER | TCG_OPF_SIDE_EFFECTS)
+DEF( panda_after_mmu_st_i32,           0,           TLADDR_ARGS + 1,     1, TCG_OPF_CALL_CLOBBER | TCG_OPF_SIDE_EFFECTS)
+DEF( panda_after_mmu_ld_i64,           0, TLADDR_ARGS + DATA64_ARGS,     1, TCG_OPF_CALL_CLOBBER | TCG_OPF_SIDE_EFFECTS | TCG_OPF_64BIT)
+DEF( panda_after_mmu_st_i64,           0, TLADDR_ARGS + DATA64_ARGS,     1, TCG_OPF_CALL_CLOBBER | TCG_OPF_SIDE_EFFECTS | TCG_OPF_64BIT)
+
 #undef TLADDR_ARGS
 #undef DATA64_ARGS
 #undef IMPL

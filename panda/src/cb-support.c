@@ -329,3 +329,168 @@ void PCB(mem_after_write)(CPUState *env, target_ptr_t pc, target_ptr_t addr,
         }
     }
 }
+
+void PCB(panda_cb_before_load)(CPUState* env, uint64_t addr, uint64_t data, size_t width, bool isSigned)
+{
+    for(panda_cb_list* plist = panda_cbs[PANDA_CB_BEFORE_LOAD]; plist != NULL; plist = panda_cb_list_next(plist))
+        if (plist->enabled)
+            plist->entry.panda_cb_before_load(env, addr, data, width, isSigned);
+}
+void PCB(panda_cb_after_load)(CPUState* env, uint64_t addr, uint64_t data, size_t width, bool isSigned)
+{
+    for(panda_cb_list* plist = panda_cbs[PANDA_CB_AFTER_LOAD]; plist != NULL; plist = panda_cb_list_next(plist))
+        if (plist->enabled)
+            plist->entry.panda_cb_before_load(env, addr, data, width, isSigned);
+}
+void PCB(panda_cb_before_store)(CPUState* env, uint64_t addr, uint64_t data, size_t width, bool isSigned)
+{
+    for(panda_cb_list* plist = panda_cbs[PANDA_CB_BEFORE_STORE]; plist != NULL; plist = panda_cb_list_next(plist))
+        if (plist->enabled)
+            plist->entry.panda_cb_before_load(env, addr, data, width, isSigned);
+}
+void PCB(panda_cb_after_store)(CPUState* env, uint64_t addr, uint64_t data, size_t width, bool isSigned)
+{
+    for(panda_cb_list* plist = panda_cbs[PANDA_CB_AFTER_STORE]; plist != NULL; plist = panda_cb_list_next(plist))
+        if (plist->enabled)
+            plist->entry.panda_cb_before_load(env, addr, data, width, isSigned);
+}
+
+#include "tcg/tcg.h"
+#include "tcg-op.h"
+typedef TCGOp* (*tcg_op_insert_fn)(TCGContext *s, TCGOp *op, TCGOpcode opc, int narg);
+
+static void add_panda_mmu_callbacks(TCGContext* s, TCGOp* op, TCGOpcode panda_mmu_opc, tcg_op_insert_fn insert_fn, bool skip_outputs)
+{
+    const TCGOpDef *old_def = &tcg_op_defs[op->opc];
+    /* our new op should match the supplied op, except we provide the output argument as an input */
+    const int num_args = ((skip_outputs) ? 0 : old_def->nb_oargs) + old_def->nb_iargs + old_def->nb_cargs;
+    TCGOp* new_op;
+    if (skip_outputs)
+    {
+        new_op = insert_fn(s, op, panda_mmu_opc, old_def->nb_iargs + old_def->nb_cargs);
+    }
+    else
+    {
+        new_op = insert_fn(s, op, panda_mmu_opc, old_def->nb_oargs + old_def->nb_iargs + old_def->nb_cargs);
+    }
+    const TCGOpDef* new_def = &tcg_op_defs[new_op->opc];
+    assert(new_def->nb_oargs == 0);
+    assert(new_def->nb_cargs == old_def->nb_cargs);
+    if (skip_outputs)
+    {
+        assert(new_def->nb_iargs == old_def->nb_iargs);
+    }
+    else
+    {
+        assert(new_def->nb_iargs == old_def->nb_iargs + old_def->nb_oargs);
+    }
+    // assert(new_def->nb_iargs == old_def->nb_iargs);
+    // assert(new_def->nb_iargs == 0);
+
+    if (skip_outputs)
+    {
+        new_op->calli = op->calli;
+    }
+    else
+    {
+        new_op->calli = op->calli + op->callo;
+    }
+    new_op->callo = 0;
+    new_op->life = op->life;
+    TCGArg *new_args = &s->gen_opparam_buf[new_op->args];
+    const TCGArg *old_args = &s->gen_opparam_buf[op->args];
+    if (skip_outputs)
+    {
+        assert(new_def->nb_iargs + new_def->nb_cargs == old_def->nb_iargs + old_def->nb_cargs);
+        for (int i = old_def->nb_oargs; i < old_def->nb_oargs + old_def->nb_iargs + old_def->nb_cargs; ++i)
+            new_args[i - old_def->nb_oargs] = old_args[i];
+    }
+    else
+    {
+        assert(new_def->nb_iargs + new_def->nb_cargs == old_def->nb_oargs + old_def->nb_iargs + old_def->nb_cargs);
+        for (int i = 0; i < num_args; ++i)
+            new_args[i] = old_args[i];
+    }
+}
+
+// #define PANDA_DEBUG_LOG_MMU_CBS
+extern void panda_tcg_pass(TCGContext* s, TranslationBlock* tb);
+void panda_tcg_pass(TCGContext* s, TranslationBlock* tb)
+{
+    int oi, oi_next;
+
+    for (oi = s->gen_op_buf[0].next; oi != 0; oi = oi_next)
+    {
+        TCGOp* op = &s->gen_op_buf[oi];
+        #ifdef PANDA_DEBUG_LOG_MMU_CBS
+        const TCGOpDef *def = &tcg_op_defs[op->opc];
+        #endif
+        oi_next = op->next;
+
+        switch (op->opc)
+        {
+            case INDEX_op_qemu_ld_i32: {
+                #ifdef PANDA_DEBUG_LOG_MMU_CBS
+                qemu_log_lock();
+                qemu_log("Adding panda_(before/after)_mmu_ld_i32 (%d/%d) to qemu_ld_i32 (%d) num_args = %d :: %d\n",
+                        INDEX_op_panda_before_mmu_ld_i32,
+                        INDEX_op_panda_after_mmu_ld_i32,
+                        op->opc,
+                        (int)def->nb_iargs + def->nb_oargs + def->nb_cargs,
+                        (int)def->nb_iargs + def->nb_cargs);
+                qemu_log_unlock();
+                #endif
+                add_panda_mmu_callbacks(s, op, INDEX_op_panda_before_mmu_ld_i32, tcg_op_insert_before, true);
+                add_panda_mmu_callbacks(s, op, INDEX_op_panda_after_mmu_ld_i32, tcg_op_insert_after, false);
+                break;
+            }
+            case INDEX_op_qemu_st_i32: {
+                #ifdef PANDA_DEBUG_LOG_MMU_CBS
+                qemu_log_lock();
+                qemu_log("Adding panda_(before/after)_mmu_st_i32 (%d/%d) to qemu_st_i32 (%d) num_args = %d :: %d\n",
+                        INDEX_op_panda_before_mmu_st_i32,
+                        INDEX_op_panda_after_mmu_st_i32,
+                        op->opc,
+                        (int)def->nb_iargs + def->nb_oargs + def->nb_cargs,
+                        (int)def->nb_iargs + def->nb_cargs);
+                qemu_log_unlock();
+                #endif
+                add_panda_mmu_callbacks(s, op, INDEX_op_panda_before_mmu_st_i32, tcg_op_insert_before, false);
+                add_panda_mmu_callbacks(s, op, INDEX_op_panda_after_mmu_st_i32, tcg_op_insert_after, false);
+                break;
+            }
+            case INDEX_op_qemu_ld_i64: {
+                #ifdef PANDA_DEBUG_LOG_MMU_CBS
+                qemu_log_lock();
+                qemu_log("Adding panda_(before/after)_mmu_ld_i64 (%d/%d) to qemu_ld_i64 (%d) num_args = %d :: %d\n",
+                        INDEX_op_panda_before_mmu_ld_i64,
+                        INDEX_op_panda_after_mmu_ld_i64,
+                        op->opc,
+                        (int)def->nb_iargs + def->nb_oargs + def->nb_cargs,
+                        (int)def->nb_iargs + def->nb_cargs);
+                qemu_log_unlock();
+                #endif
+                add_panda_mmu_callbacks(s, op, INDEX_op_panda_before_mmu_ld_i64, tcg_op_insert_before, true);
+                add_panda_mmu_callbacks(s, op, INDEX_op_panda_after_mmu_ld_i64, tcg_op_insert_after, false);
+                break;
+            }
+            case INDEX_op_qemu_st_i64: {
+                #ifdef PANDA_DEBUG_LOG_MMU_CBS
+                qemu_log_lock();
+                qemu_log("Adding panda_(before/after)_mmu_st_i64 (%d/%d) to qemu_st_i64 (%d) num_args = %d :: %d\n",
+                        INDEX_op_panda_before_mmu_st_i64,
+                        INDEX_op_panda_after_mmu_st_i64,
+                        op->opc,
+                        (int)def->nb_iargs + def->nb_oargs + def->nb_cargs,
+                        (int)def->nb_iargs + def->nb_cargs);
+                qemu_log_unlock();
+                #endif
+                add_panda_mmu_callbacks(s, op, INDEX_op_panda_before_mmu_st_i64, tcg_op_insert_before, false);
+                add_panda_mmu_callbacks(s, op, INDEX_op_panda_after_mmu_st_i64, tcg_op_insert_after, false);
+                break;
+            }
+            default:
+                break;
+        }
+    }
+}

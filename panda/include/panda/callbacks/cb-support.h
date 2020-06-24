@@ -133,3 +133,8 @@ bool panda_callbacks_guest_hypercall(CPUState *env);
 /* invoked from translate-all.c */
 void panda_callbacks_cpu_restore_state(CPUState *env, TranslationBlock *tb);
 
+void panda_callbacks_panda_cb_before_load(CPUState* env, uint64_t addr, uint64_t data, size_t width, bool isSigned);
+void panda_callbacks_panda_cb_after_load(CPUState* env, uint64_t addr, uint64_t data, size_t width, bool isSigned);
+void panda_callbacks_panda_cb_before_store(CPUState* env, uint64_t addr, uint64_t data, size_t width, bool isSigned);
+void panda_callbacks_panda_cb_after_store(CPUState* env, uint64_t addr, uint64_t data, size_t width, bool isSigned);
+

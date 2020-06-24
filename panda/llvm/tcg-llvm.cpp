@@ -1317,6 +1317,17 @@ int TCGLLVMContextPrivate::generateOperation(int opc, const TCGOp *op,
 #undef __OP_QEMU_LD
 #undef __OP_QEMU_ST
 
+    /* PANDA Faux MMU Ops (NOPs) */
+    case INDEX_op_panda_before_mmu_ld_i32:
+    case INDEX_op_panda_before_mmu_ld_i64:
+    case INDEX_op_panda_after_mmu_ld_i32:
+    case INDEX_op_panda_after_mmu_ld_i64:
+    case INDEX_op_panda_before_mmu_st_i32:
+    case INDEX_op_panda_before_mmu_st_i64:
+    case INDEX_op_panda_after_mmu_st_i32:
+    case INDEX_op_panda_after_mmu_st_i64:
+        break;
+
     case INDEX_op_exit_tb:
         m_builder.CreateRet(ConstantInt::get(wordType(), args[0]));
         break;

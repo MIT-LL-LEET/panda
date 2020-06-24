@@ -1116,6 +1116,15 @@ void tcg_dump_ops(TCGContext *s)
             case INDEX_op_qemu_st_i32:
             case INDEX_op_qemu_ld_i64:
             case INDEX_op_qemu_st_i64:
+            /* PANDA Faux MMU Ops */
+            case INDEX_op_panda_before_mmu_ld_i32:
+            case INDEX_op_panda_before_mmu_ld_i64:
+            case INDEX_op_panda_after_mmu_ld_i32:
+            case INDEX_op_panda_after_mmu_ld_i64:
+            case INDEX_op_panda_before_mmu_st_i32:
+            case INDEX_op_panda_before_mmu_st_i64:
+            case INDEX_op_panda_after_mmu_st_i32:
+            case INDEX_op_panda_after_mmu_st_i64:
                 {
                     TCGMemOpIdx oi = args[k++];
                     TCGMemOp op = get_memop(oi);
@@ -2503,10 +2512,14 @@ void tcg_dump_op_count(FILE *f, fprintf_function cpu_fprintf)
 }
 #endif
 
+extern void panda_tcg_pass(TCGContext *s, TranslationBlock *tb);
 
 int tcg_gen_code(TCGContext *s, TranslationBlock *tb)
 {
     int i, oi, oi_next, num_insns;
+
+    /* Allow panda to view and potentially change translation */
+    panda_tcg_pass(s, tb);
 
 #ifdef CONFIG_PROFILER
     {
