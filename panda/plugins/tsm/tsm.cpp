@@ -35,8 +35,8 @@ extern "C" {
 
 }
 
-#include "callstack_instr/callstack_instr.h"
-#include "callstack_instr/callstack_instr_ext.h"
+//#include "callstack_instr/callstack_instr.h"
+//#include "callstack_instr/callstack_instr_ext.h"
 
 #define TSM_PRE "tsm: "
 using namespace std;
@@ -137,14 +137,11 @@ vector<vector<OsiModule>> module_list_lists;
 
 bool asid_changed(CPUState *cpu, target_ulong old_asid, target_ulong new_asid) {
 
-    if (old_asid == the_asid) 
-        cout << TSM_PRE "asid_changed: old_asid is the_asid\n";
-
-    if (new_asid == the_asid) 
-        cout << TSM_PRE "asid_changed: new_asid is the_asid\n";
-
+    if (the_asid != 0) 
+        if (new_asid != the_asid) 
+            return false;   
+ 
     OsiProc *current = get_current_process(cpu);
-    if (current->asid != the_asid) return false;
 
     GArray *ms = get_mappings(cpu, current);
     if (ms == NULL) 
@@ -152,7 +149,10 @@ bool asid_changed(CPUState *cpu, target_ulong old_asid, target_ulong new_asid) {
 
     // We are in the right process & we have at least some libs.
     // Time to turn on taint.
-    if (!taint2_enabled()) taint2_enable_taint();
+    if (!taint2_enabled()) {
+        cout << TSM_PRE << "enabling tiant \n";
+        taint2_enable_taint();
+    }
 
     // add another list of modules to the list of lists we
     // are maintaining
@@ -181,11 +181,14 @@ bool asid_changed(CPUState *cpu, target_ulong old_asid, target_ulong new_asid) {
     
 
 void after_write(CPUState *env, target_ptr_t pc, target_ptr_t addr, size_t size, uint8_t *buf) {
-    if (!taint2_enabled()
-        || (the_asid !=0 && panda_current_asid(env) != the_asid)
-        || (track_kernel && !panda_in_kernel(env))) {         
-        return;
-    }
+
+    if (!taint2_enabled()) return;
+
+    if (the_asid != 0) 
+        if (panda_current_asid(env) != the_asid) return;    
+
+    if (!track_kernel) 
+        if (panda_in_kernel(env)) return;
 
     WriteInfo wi;
     wi.pc = pc;
@@ -221,11 +224,14 @@ void after_write(CPUState *env, target_ptr_t pc, target_ptr_t addr, size_t size,
 
 
 void before_read(CPUState *env, target_ptr_t pc, target_ptr_t addr, size_t size) {
-    if (first_taint_instr == 0 
-        || (the_asid !=0 && panda_current_asid(env) != the_asid)
-        || (track_kernel && !panda_in_kernel(env))) {         
+    if (first_taint_instr == 0)
         return;
-    }
+
+    if (the_asid != 0) 
+        if (panda_current_asid(env) != the_asid) return;    
+
+    if (!track_kernel) 
+        if (panda_in_kernel(env)) return;
 
     // collect labels for this read
     all_labels.clear();
@@ -282,9 +288,10 @@ bool init_plugin(void *self) {
     panda_require("taint2");
     assert (init_taint2_api());
 
+/*
     panda_require("callstack_instr");
     assert(init_callstack_instr_api());
-
+*/
     panda_require("osi");
     assert(init_osi_api());
   
@@ -304,10 +311,11 @@ bool init_plugin(void *self) {
         cout << TSM_PRE << "tracking only asid = " << hex << the_asid << dec << "\n";
      }
    
-     track_kernel = panda_parse_bool_opt(args, "debug", "turn on debug output");
+     track_kernel = panda_parse_bool_opt(args, "kernel", "turn on debug output");
      if (track_kernel) 
          cout << TSM_PRE << "tracking kernel writes & reads too\n";
-
+     else
+         cout << TSM_PRE << "NOT tracking kernel writes & reads\n";
 
     panda_cb pcb; 
 
@@ -350,10 +358,13 @@ bool getCodeOffset(target_ptr_t pc, vector<OsiModule> &modules, Panda__CodeOffse
 
 void uninit_plugin(void *) {
     size_t nm = module_list_lists.size();
+    if (nm == 0) return;
+
     int b = nm * BELIEVE_IT_FRACTION;
     cout << TSM_PRE << "Collected " << dec << nm << " module lists for asid=" << hex << the_asid << "\n";
-    cout << TSM_PRE << dec << "... selecting i=" << b << "\n";
+    cout << TSM_PRE << dec << "... selecting i=" << b << " of " << nm << "\n";
     vector<OsiModule> modules = module_list_lists[b];
+
     Panda__CodeOffset *co_src  = (Panda__CodeOffset *) malloc(sizeof(Panda__CodeOffset));
     *co_src = PANDA__CODE_OFFSET__INIT;
     Panda__CodeOffset *co_dest  = (Panda__CodeOffset *) malloc(sizeof(Panda__CodeOffset));
@@ -368,12 +379,22 @@ void uninit_plugin(void *) {
         target_ptr_t src_pc = wi.pc;
         success = getCodeOffset(src_pc, modules, co_dest);
         if (!success) continue;
-        Panda__TaintFlow *tf = (Panda__TaintFlow *) malloc (sizeof(Panda__TaintFlow));
-        *tf = PANDA__TAINT_FLOW__INIT;
-        tf->src = co_src;
-        tf->dest = co_dest;
-        Panda__LogEntry ple = PANDA__LOG_ENTRY__INIT;
-        ple.taint_flow = tf;
-        pandalog_write_entry(&ple);
-    }
+
+        if (pandalog) {
+            Panda__TaintFlow *tf = (Panda__TaintFlow *) malloc (sizeof(Panda__TaintFlow));
+            *tf = PANDA__TAINT_FLOW__INIT;
+            tf->src = co_src;
+            tf->dest = co_dest;
+            Panda__LogEntry ple = PANDA__LOG_ENTRY__INIT;
+            ple.taint_flow = tf;
+            pandalog_write_entry(&ple);
+        }
+        else {
+            cout << TSM_PRE << " flow (" 
+                 << co_src->name << "," << hex << co_src->offset << ")"
+                 << " --> (" 
+                 << co_dest->name << "," << hex << co_dest->offset << ")"
+                 << "\n";
+        }
+    }        
 }
