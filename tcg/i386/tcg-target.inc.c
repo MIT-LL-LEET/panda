@@ -2528,14 +2528,26 @@ static const TCGTargetOpDef *tcg_target_op_def(TCGOpcode op)
                 : TARGET_LONG_BITS <= TCG_TARGET_REG_BITS ? &L_L_L
                 : &L_L_L_L);
 
-    /* PANDA Faux MMU Ops (just mirroring qemu_st/ld) */
+    /* PANDA Faux MMU Ops (mostly just mirroring qemu_st/ld) */
     case INDEX_op_panda_before_mmu_ld_i32:
+    {
+        /* before load instructions are missing the output parameters */
+        static const TCGTargetOpDef L = { .args_ct_str = { "L" } };
+        return TARGET_LONG_BITS <= TCG_TARGET_REG_BITS ? &L : &L_L;
+    }
     case INDEX_op_panda_after_mmu_ld_i32:
         return TARGET_LONG_BITS <= TCG_TARGET_REG_BITS ? &r_L : &r_L_L;
     case INDEX_op_panda_before_mmu_st_i32:
     case INDEX_op_panda_after_mmu_st_i32:
         return TARGET_LONG_BITS <= TCG_TARGET_REG_BITS ? &L_L : &L_L_L;
     case INDEX_op_panda_before_mmu_ld_i64:
+    {
+        /* before load instructions are missing the output parameters */
+        static const TCGTargetOpDef L = { .args_ct_str = { "L" } };
+        return (TCG_TARGET_REG_BITS == 64 ? &L
+                : TARGET_LONG_BITS <= TCG_TARGET_REG_BITS ? &L
+                : &L_L);
+    }
     case INDEX_op_panda_after_mmu_ld_i64:
         return (TCG_TARGET_REG_BITS == 64 ? &r_L
                 : TARGET_LONG_BITS <= TCG_TARGET_REG_BITS ? &r_r_L
