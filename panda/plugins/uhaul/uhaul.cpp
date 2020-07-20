@@ -21,10 +21,10 @@ extern "C" {
 bool init_plugin(void*);
 void uninit_plugin(void*);
 
-static void panda_cb_before_load(CPUState* env, uint64_t addr, uint64_t data, size_t width, bool isSigned);
-static void panda_cb_after_load(CPUState* env, uint64_t addr, uint64_t data, size_t width, bool isSigned);
-static void panda_cb_before_store(CPUState* env, uint64_t addr, uint64_t data, size_t width, bool isSigned);
-static void panda_cb_after_store(CPUState* env, uint64_t addr, uint64_t data, size_t width, bool isSigned);
+static void before_load(CPUState* env, uint64_t addr, uint64_t data, size_t width, bool isSigned);
+static void after_load(CPUState* env, uint64_t addr, uint64_t data, size_t width, bool isSigned);
+static void before_store(CPUState* env, uint64_t addr, uint64_t data, size_t width, bool isSigned);
+static void after_store(CPUState* env, uint64_t addr, uint64_t data, size_t width, bool isSigned);
 }
 
 static const char* OutputFileName;
@@ -44,7 +44,7 @@ static inline bool in_kernelspace(CPUState* cpu)
 #endif
 }
 
-static void panda_cb_before_load(CPUState* env, uint64_t addr, uint64_t data, size_t width, bool isSigned)
+static void before_load(CPUState* env, uint64_t addr, uint64_t data, size_t width, bool isSigned)
 {
     uint64_t cpu_pc = 0;
     #if defined(TARGET_I386)
@@ -58,7 +58,7 @@ static void panda_cb_before_load(CPUState* env, uint64_t addr, uint64_t data, si
         x86_cpu_dump_state(env, OutputFile, fprintf, 0);
     #endif
 }
-static void panda_cb_after_load(CPUState* env, uint64_t addr, uint64_t data, size_t width, bool isSigned)
+static void after_load(CPUState* env, uint64_t addr, uint64_t data, size_t width, bool isSigned)
 {
     uint64_t cpu_pc = 0;
     #if defined(TARGET_I386)
@@ -72,7 +72,7 @@ static void panda_cb_after_load(CPUState* env, uint64_t addr, uint64_t data, siz
         x86_cpu_dump_state(env, OutputFile, fprintf, 0);
     #endif
 }
-static void panda_cb_before_store(CPUState* env, uint64_t addr, uint64_t data, size_t width, bool isSigned)
+static void before_store(CPUState* env, uint64_t addr, uint64_t data, size_t width, bool isSigned)
 {
     uint64_t cpu_pc = 0;
     #if defined(TARGET_I386)
@@ -86,7 +86,7 @@ static void panda_cb_before_store(CPUState* env, uint64_t addr, uint64_t data, s
         x86_cpu_dump_state(env, OutputFile, fprintf, 0);
     #endif
 }
-static void panda_cb_after_store(CPUState* env, uint64_t addr, uint64_t data, size_t width, bool isSigned)
+static void after_store(CPUState* env, uint64_t addr, uint64_t data, size_t width, bool isSigned)
 {
     uint64_t cpu_pc = 0;
     #if defined(TARGET_I386)
@@ -127,13 +127,13 @@ bool init_plugin(void* self)
 
     // panda_enable_precise_pc();
 
-    pcb.panda_cb_before_load = panda_cb_before_load;
+    pcb.before_load = before_load;
     panda_register_callback(self, PANDA_CB_BEFORE_LOAD, pcb);
-    pcb.panda_cb_after_load = panda_cb_after_load;
+    pcb.after_load = after_load;
     panda_register_callback(self, PANDA_CB_AFTER_LOAD, pcb);
-    pcb.panda_cb_before_store = panda_cb_before_store;
+    pcb.before_store = before_store;
     panda_register_callback(self, PANDA_CB_BEFORE_STORE, pcb);
-    pcb.panda_cb_after_store = panda_cb_after_store;
+    pcb.after_store = after_store;
     panda_register_callback(self, PANDA_CB_AFTER_STORE, pcb);
 
     return true;

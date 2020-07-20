@@ -83,6 +83,11 @@ typedef enum panda_cb_type {
 
     PANDA_CB_BEFORE_HANDLE_INTERRUPT, // ditto, for interrupts
 
+    PANDA_CB_BEFORE_LOAD,
+    PANDA_CB_AFTER_LOAD,
+    PANDA_CB_BEFORE_STORE,
+    PANDA_CB_AFTER_STORE,
+
     PANDA_CB_LAST
 } panda_cb_type;
 
@@ -966,6 +971,11 @@ typedef union panda_cb {
 
 
     int32_t (*before_handle_interrupt)(CPUState *cpu, int32_t interrupt_request);
+
+    void (*before_load)(CPUState* env, uint64_t addr, uint64_t data, size_t width, bool isSigned);
+    void (*after_load)(CPUState* env, uint64_t addr, uint64_t data, size_t width, bool isSigned);
+    void (*before_store)(CPUState* env, uint64_t addr, uint64_t data, size_t width, bool isSigned);
+    void (*after_store)(CPUState* env, uint64_t addr, uint64_t data, size_t width, bool isSigned);
 
     void (*cbaddr)(void);
 } panda_cb;

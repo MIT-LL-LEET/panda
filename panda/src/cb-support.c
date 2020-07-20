@@ -330,29 +330,29 @@ void PCB(mem_after_write)(CPUState *env, target_ptr_t pc, target_ptr_t addr,
     }
 }
 
-void PCB(panda_cb_before_load)(CPUState* env, uint64_t addr, uint64_t data, size_t width, bool isSigned)
+void PCB(before_load)(CPUState* env, uint64_t addr, uint64_t data, size_t width, bool isSigned)
 {
     for(panda_cb_list* plist = panda_cbs[PANDA_CB_BEFORE_LOAD]; plist != NULL; plist = panda_cb_list_next(plist))
         if (plist->enabled)
-            plist->entry.panda_cb_before_load(env, addr, data, width, isSigned);
+            plist->entry.before_load(env, addr, data, width, isSigned);
 }
-void PCB(panda_cb_after_load)(CPUState* env, uint64_t addr, uint64_t data, size_t width, bool isSigned)
+void PCB(after_load)(CPUState* env, uint64_t addr, uint64_t data, size_t width, bool isSigned)
 {
     for(panda_cb_list* plist = panda_cbs[PANDA_CB_AFTER_LOAD]; plist != NULL; plist = panda_cb_list_next(plist))
         if (plist->enabled)
-            plist->entry.panda_cb_before_load(env, addr, data, width, isSigned);
+            plist->entry.after_load(env, addr, data, width, isSigned);
 }
-void PCB(panda_cb_before_store)(CPUState* env, uint64_t addr, uint64_t data, size_t width, bool isSigned)
+void PCB(before_store)(CPUState* env, uint64_t addr, uint64_t data, size_t width, bool isSigned)
 {
     for(panda_cb_list* plist = panda_cbs[PANDA_CB_BEFORE_STORE]; plist != NULL; plist = panda_cb_list_next(plist))
         if (plist->enabled)
-            plist->entry.panda_cb_before_load(env, addr, data, width, isSigned);
+            plist->entry.before_store(env, addr, data, width, isSigned);
 }
-void PCB(panda_cb_after_store)(CPUState* env, uint64_t addr, uint64_t data, size_t width, bool isSigned)
+void PCB(after_store)(CPUState* env, uint64_t addr, uint64_t data, size_t width, bool isSigned)
 {
     for(panda_cb_list* plist = panda_cbs[PANDA_CB_AFTER_STORE]; plist != NULL; plist = panda_cb_list_next(plist))
         if (plist->enabled)
-            plist->entry.panda_cb_before_load(env, addr, data, width, isSigned);
+            plist->entry.after_store(env, addr, data, width, isSigned);
 }
 
 #include "tcg/tcg.h"

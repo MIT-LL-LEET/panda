@@ -14,6 +14,8 @@ extern "C" {
 #include "taint2/taint2_ext.h"
 #include "osi/osi_types.h"
 #include "osi/osi_ext.h"
+
+#include "asidstory/asidstory.h"
 }
 
 #include <iostream>
@@ -127,7 +129,7 @@ int collect_labels(TaintLabel l, void *stuff) {
 
 
 
-/*   For every asid change, if new asid is the one we are monitoring,
+/*   For process change, if new asid is the one we are monitoring,
      collect vector of libraries.  These will be used to convert pc to
      libname/offset on output.  NB: We collect, in sequence, all of the
      module lists osi finds.  Idea is first few and last few are likely
@@ -135,23 +137,31 @@ int collect_labels(TaintLabel l, void *stuff) {
 
 vector<vector<OsiModule>> module_list_lists;
 
-bool asid_changed(CPUState *cpu, target_ulong old_asid, target_ulong new_asid) {
+bool pls_enable_taint = false;
+
+OsiProc current;
+
+void process_changed(CPUState *cpu, target_ulong new_asid, OsiProc *proc) {
 
     if (the_asid != 0) 
         if (new_asid != the_asid) 
-            return false;   
+            return ;   
  
-    OsiProc *current = get_current_process(cpu);
+//    OsiProc *current = get_current_process(cpu);
 
-    GArray *ms = get_mappings(cpu, current);
+    cout << "process_name=" << proc->name << "\n";
+
+    current = *proc;
+    current.name = strdup(proc->name);
+
+    GArray *ms = get_mappings(cpu, proc);
     if (ms == NULL) 
-        return false;
+        return ;
 
     // We are in the right process & we have at least some libs.
     // Time to turn on taint.
     if (!taint2_enabled()) {
-        cout << TSM_PRE << "enabling tiant \n";
-        taint2_enable_taint();
+        pls_enable_taint = true;
     }
 
     // add another list of modules to the list of lists we
@@ -171,50 +181,75 @@ bool asid_changed(CPUState *cpu, target_ulong old_asid, target_ulong new_asid) {
             mm.name = strdup(m->name);
         else
             mm.name = strdup("Unknown_name");
+        cout << "module name=" << mm.name << " base=" << hex << mm.base << dec << "\n";
         module_list.push_back(mm);
     }
     module_list_lists.push_back(module_list);
 
-    return false;
+    return ;
 }
 
-    
 
-void after_write(CPUState *env, target_ptr_t pc, target_ptr_t addr, size_t size, uint8_t *buf) {
+void maybe_enable_taint(CPUState *cpu, target_ptr_t pc) {
+    if (pls_enable_taint && !taint2_enabled()) {
+        cout << TSM_PRE << "enabling taint \n";
+        taint2_enable_taint();
+    }
+}
+
+void after_store(CPUState *cpu, uint64_t addr, uint64_t data, size_t size, bool isSigned) {
 
     if (!taint2_enabled()) return;
 
     if (the_asid != 0) 
-        if (panda_current_asid(env) != the_asid) return;    
+        if (panda_current_asid(cpu) != the_asid) return;    
 
     if (!track_kernel) 
-        if (panda_in_kernel(env)) return;
+        if (panda_in_kernel(cpu)) return;
+
+    // obtain data just stored
+    int size32max = (size < 32) ? size : 32;
+    uint8_t read_buf[32];    
+    int rv = panda_virtual_memory_read(cpu, addr, read_buf, size);
+    if (rv == -1) {
+        // not there. is that even possible?
+        return;
+    }
+
+    target_ulong pc = panda_current_pc(cpu);
+
+    cout << "Write @ pc=" << hex << pc << " data (first part): [";    
+    for (int i=0; i<size32max; i++)
+        printf ("%02x ", read_buf[i]);
+    cout << "]\n";
 
     WriteInfo wi;
     wi.pc = pc;
-    wi.asid = panda_current_asid(env);
-    wi.in_kernel = panda_in_kernel(env);
+    wi.asid = panda_current_asid(cpu);
+    wi.in_kernel = panda_in_kernel(cpu);
 
     TaintLabel l;
     if (wi2l.count(wi) == 0) {
-        // new label since this is first time we've seen this WriteInfo
+        // l is new label since this is first time we've seen this WriteInfo
         l = 1 + wi2l.size();
         wi2l[wi] = l;
         l2wi[l] = wi;
-        cout << TSM_PRE "New tsm label: " << dec << l << " " << wi << "\n";
+        cout << TSM_PRE "proc=" << current.name << " pid=" << current.pid << " asid=";
+        cout << hex << current.asid << " -- new tsm label: " << dec << l << " " << wi << "\n";
     }
     else  {
         // old label
         l = wi2l[wi];
     }
-
+    
     // NB: yes, we just discard / overwrite any existing taint labels 
     // on this memory exetent
     for (int i=0; i<size; i++) {
-        hwaddr pa = panda_virt_to_phys(env, addr + i);
+        hwaddr pa = panda_virt_to_phys(cpu, addr + i);
         if (pa == (hwaddr)(-1) || pa >= ram_size)
             continue;
         taint2_label_ram(pa, l);
+        cout << "Write. l=" << dec << l << " size=" << size << " bytes\n";
         if (first_taint_instr == 0) {
             first_taint_instr = rr_get_guest_instr_count();
             cout << TSM_PRE "first taint instr is " << first_taint_instr << "\n";
@@ -223,31 +258,57 @@ void after_write(CPUState *env, target_ptr_t pc, target_ptr_t addr, size_t size,
 }
 
 
-void before_read(CPUState *env, target_ptr_t pc, target_ptr_t addr, size_t size) {
+void before_load(CPUState *cpu, uint64_t addr, uint64_t data, size_t size, bool isSigned) {
+
     if (first_taint_instr == 0)
         return;
 
     if (the_asid != 0) 
-        if (panda_current_asid(env) != the_asid) return;    
+        if (panda_current_asid(cpu) != the_asid) return;    
 
     if (!track_kernel) 
-        if (panda_in_kernel(env)) return;
+        if (panda_in_kernel(cpu)) return;
+
+    // obtain data about to be loaded
+    int size32max = (size < 32) ? size : 32;
+    uint8_t read_buf[32];
+    int rv = panda_virtual_memory_read(cpu, addr, read_buf, size32max);
+    if (rv == -1) {
+        // not there -- is that even possible?
+        return;
+    }
 
     // collect labels for this read
     all_labels.clear();
+    int num_tainted = 0;
     for (int i=0; i<size; i++) {
-        hwaddr pa = panda_virt_to_phys(env, addr + i);
+        hwaddr pa = panda_virt_to_phys(cpu, addr + i);
         if (pa == (hwaddr)(-1) || pa >= ram_size) 
             continue;
-        if (taint2_query_ram(pa)) 
+        if (taint2_query_ram(pa)) {
             taint2_labelset_ram_iter(pa, collect_labels, NULL);
+            num_tainted ++;
+        }
     }                
 
+    target_ulong pc = panda_current_pc(cpu);
+    cout << TSM_PRE "proc=" << current.name << " pid=" << current.pid << " asid=";
+    cout << hex << current.asid;
+    cout << "Read @ pc=" << hex << pc << dec << " size=" << size << " num_tainted=" << num_tainted << "\n";
+    cout << "Read data (first part): [";
+    for (int i=0; i<size32max; i++)
+        printf ("%02x ", read_buf[i]);
+    cout << "]\n";
+
+
+    if (num_tainted == 0) return;
+                                                                             
     // every label observed on this read indicates a flow from a prior labeled write
     for (auto l : all_labels) {
         // there is a flow from write that is label l to this read
-        target_ptr_t asid = panda_current_asid(env);
+        target_ptr_t asid = panda_current_asid(cpu);
         Flow f = {l,asid,pc}; 
+        cout << "Flow: " << dec << l << " asid=" << hex << asid << " pc=" << pc << "\n";
         flows[f]++;
         num_flows ++;
     }
@@ -294,6 +355,8 @@ bool init_plugin(void *self) {
 */
     panda_require("osi");
     assert(init_osi_api());
+
+    panda_require("asidstory");
   
     panda_arg_list *args = panda_get_args("tsm");
 
@@ -317,18 +380,30 @@ bool init_plugin(void *self) {
      else
          cout << TSM_PRE << "NOT tracking kernel writes & reads\n";
 
-    panda_cb pcb; 
+
 
     // to monitor osi libs for asid of interest
-    pcb.asid_changed = asid_changed;
-    panda_register_callback(self, PANDA_CB_ASID_CHANGED, pcb);
+    PPP_REG_CB("asidstory", on_proc_change, process_changed);
+
+    panda_cb pcb; 
+
+    pcb.before_block_translate = maybe_enable_taint;
+    panda_register_callback(self, PANDA_CB_BEFORE_BLOCK_TRANSLATE, pcb);
+
+//    pcb.asid_changed = asid_changed;
+//    panda_register_callback(self, PANDA_CB_ASID_CHANGED, pcb);
+
     // to label writes to memory
-    pcb.virt_mem_after_write = after_write;
-    panda_register_callback(self, PANDA_CB_VIRT_MEM_AFTER_WRITE, pcb);
+//    pcb.virt_mem_after_write = after_write;
+//    panda_register_callback(self, PANDA_CB_VIRT_MEM_AFTER_WRITE, pcb);
+    pcb.after_store = after_store;
+    panda_register_callback(self, PANDA_CB_AFTER_STORE, pcb);
+
     // to query reads from memory
-    pcb.virt_mem_before_read = before_read;
-    panda_register_callback(self, PANDA_CB_VIRT_MEM_BEFORE_READ, pcb);
-  
+//    pcb.virt_mem_before_read = before_read;
+//    panda_register_callback(self, PANDA_CB_VIRT_MEM_BEFORE_READ, pcb);
+    pcb.before_load = before_load;
+    panda_register_callback(self, PANDA_CB_BEFORE_LOAD, pcb);
 
     panda_enable_precise_pc();
 
