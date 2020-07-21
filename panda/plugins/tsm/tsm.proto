@@ -11,7 +11,7 @@ message CodeOffset {
 message TaintFlow {
     required CodeOffset src = 1;
     required CodeOffset dest = 2;
-}   
+}
 
 
 optional TaintFlow taint_flow = 57;

@@ -2,7 +2,7 @@
 #define __STDC_FORMAT_MACROS
 
 extern "C" {
-#include <stdint.h>    
+#include <stdint.h>
 #include <sys/time.h>
 #include <sys/resource.h>
 }
@@ -25,7 +25,7 @@ extern "C" {
 #include <set>
 #include <stack>
 
-#include <bits/stdc++.h> 
+#include <bits/stdc++.h>
 
 // These need to be extern "C" so that the ABI is compatible with
 // QEMU/PANDA, which is written in C
@@ -54,7 +54,7 @@ struct WriteInfo {
     bool in_kernel;
 
     // ignore fn name here
-    bool operator <(const WriteInfo &other) const { 
+    bool operator <(const WriteInfo &other) const {
         if (this->asid < other.asid) return true;
         if (this->asid > other.asid) return false;
         if (this->pc < other.pc) return true;
@@ -77,7 +77,7 @@ struct WriteInfo {
 
 struct Flow {
     TaintLabel src; // label of write source
-    target_ptr_t dest_asid; 
+    target_ptr_t dest_asid;
     target_ptr_t dest_pc;
 
     bool operator <(const Flow &other) const {
@@ -90,7 +90,7 @@ struct Flow {
     }
 };
 
-    
+
 map<WriteInfo, TaintLabel> wi2l;
 map<uint32_t, WriteInfo> l2wi;
 
@@ -115,7 +115,7 @@ void clear_taint() {
     for (uint32_t pa=0; pa<ram_size; pa++)
         taint2_delete_ram(pa);
 */
-}        
+}
 
 
 // used to collect labels via iterator
@@ -143,10 +143,10 @@ OsiProc current;
 
 void process_changed(CPUState *cpu, target_ulong new_asid, OsiProc *proc) {
 
-    if (the_asid != 0) 
-        if (new_asid != the_asid) 
-            return ;   
- 
+    if (the_asid != 0)
+        if (new_asid != the_asid)
+            return;
+
 //    OsiProc *current = get_current_process(cpu);
 
     cout << "process_name=" << proc->name << "\n";
@@ -155,7 +155,7 @@ void process_changed(CPUState *cpu, target_ulong new_asid, OsiProc *proc) {
     current.name = strdup(proc->name);
 
     GArray *ms = get_mappings(cpu, proc);
-    if (ms == NULL) 
+    if (ms == NULL)
         return ;
 
     // We are in the right process & we have at least some libs.
@@ -201,15 +201,15 @@ void after_store(CPUState *cpu, uint64_t addr, uint64_t data, size_t size, bool 
 
     if (!taint2_enabled()) return;
 
-    if (the_asid != 0) 
-        if (panda_current_asid(cpu) != the_asid) return;    
+    if (the_asid != 0)
+        if (panda_current_asid(cpu) != the_asid) return;
 
-    if (!track_kernel) 
+    if (!track_kernel)
         if (panda_in_kernel(cpu)) return;
 
     // obtain data just stored
     int size32max = (size < 32) ? size : 32;
-    uint8_t read_buf[32];    
+    uint8_t read_buf[32];
     int rv = panda_virtual_memory_read(cpu, addr, read_buf, size);
     if (rv == -1) {
         // not there. is that even possible?
@@ -218,7 +218,7 @@ void after_store(CPUState *cpu, uint64_t addr, uint64_t data, size_t size, bool 
 
     target_ulong pc = panda_current_pc(cpu);
 
-    cout << "Write @ pc=" << hex << pc << " data (first part): [";    
+    cout << "Write @ pc=" << hex << pc << " data (first part): [";
     for (int i=0; i<size32max; i++)
         printf ("%02x ", read_buf[i]);
     cout << "]\n";
@@ -241,8 +241,8 @@ void after_store(CPUState *cpu, uint64_t addr, uint64_t data, size_t size, bool 
         // old label
         l = wi2l[wi];
     }
-    
-    // NB: yes, we just discard / overwrite any existing taint labels 
+
+    // NB: yes, we just discard / overwrite any existing taint labels
     // on this memory exetent
     for (int i=0; i<size; i++) {
         hwaddr pa = panda_virt_to_phys(cpu, addr + i);
@@ -254,7 +254,7 @@ void after_store(CPUState *cpu, uint64_t addr, uint64_t data, size_t size, bool 
             first_taint_instr = rr_get_guest_instr_count();
             cout << TSM_PRE "first taint instr is " << first_taint_instr << "\n";
         }
-    }            
+    }
 }
 
 
@@ -263,10 +263,10 @@ void before_load(CPUState *cpu, uint64_t addr, uint64_t data, size_t size, bool 
     if (first_taint_instr == 0)
         return;
 
-    if (the_asid != 0) 
-        if (panda_current_asid(cpu) != the_asid) return;    
+    if (the_asid != 0)
+        if (panda_current_asid(cpu) != the_asid) return;
 
-    if (!track_kernel) 
+    if (!track_kernel)
         if (panda_in_kernel(cpu)) return;
 
     // obtain data about to be loaded
@@ -289,7 +289,7 @@ void before_load(CPUState *cpu, uint64_t addr, uint64_t data, size_t size, bool 
             taint2_labelset_ram_iter(pa, collect_labels, NULL);
             num_tainted ++;
         }
-    }                
+    }
 
     target_ulong pc = panda_current_pc(cpu);
     cout << TSM_PRE "proc=" << current.name << " pid=" << current.pid << " asid=";
@@ -302,12 +302,12 @@ void before_load(CPUState *cpu, uint64_t addr, uint64_t data, size_t size, bool 
 
 
     if (num_tainted == 0) return;
-                                                                             
+
     // every label observed on this read indicates a flow from a prior labeled write
     for (auto l : all_labels) {
         // there is a flow from write that is label l to this read
         target_ptr_t asid = panda_current_asid(cpu);
-        Flow f = {l,asid,pc}; 
+        Flow f = {l,asid,pc};
         cout << "Flow: " << dec << l << " asid=" << hex << asid << " pc=" << pc << "\n";
         flows[f]++;
         num_flows ++;
@@ -315,30 +315,30 @@ void before_load(CPUState *cpu, uint64_t addr, uint64_t data, size_t size, bool 
 
     double replay_percent = rr_get_percentage();
 
-    if (replay_percent > next_replay_percent) {        
-        
+    if (replay_percent > next_replay_percent) {
+
         struct rusage rusage;
         getrusage(RUSAGE_SELF, &rusage);
-        
+
         struct timeval* time = &rusage.ru_utime;
         float secs =
             ((float)time->tv_sec * 1000000 + (float)time->tv_usec) /
             1000000.0;
 
         uint64_t instr = rr_get_guest_instr_count();
-        
+
         cout << TSM_PRE << dec << "replay: " << replay_percent << " instr: " << instr
              << " labels: " << wi2l.size() << " num_flows: " << num_flows 
              << " u_flows: " << flows.size() << hex 
              << " secs: " << dec << secs 
              << " mem_GB: " << rusage.ru_maxrss / 1024.0 / 1024.0
              << "\n";
-        
+
         while (replay_percent > next_replay_percent) 
             next_replay_percent += 1;
         cout << TSM_PRE << "next_replay_percent = " << next_replay_percent << "\n";
     }
-    
+
 
 }
 
@@ -357,14 +357,14 @@ bool init_plugin(void *self) {
     assert(init_osi_api());
 
     panda_require("asidstory");
-  
+
     panda_arg_list *args = panda_get_args("tsm");
 
     const char *asid_s = nullptr;
-    asid_s = 
+    asid_s =
         panda_parse_string_opt(args, "asid", nullptr,
                                "asid of the process for which to build taint semantic map (if missing, all asids will be tracked)");
-    
+
     if (asid_s == nullptr) {
         cout << TSM_PRE << "tracking all asids\n";
         the_asid = 0;
@@ -373,9 +373,9 @@ bool init_plugin(void *self) {
         the_asid = strtoul(asid_s, NULL, 16);
         cout << TSM_PRE << "tracking only asid = " << hex << the_asid << dec << "\n";
      }
-   
+
      track_kernel = panda_parse_bool_opt(args, "kernel", "turn on debug output");
-     if (track_kernel) 
+     if (track_kernel)
          cout << TSM_PRE << "tracking kernel writes & reads too\n";
      else
          cout << TSM_PRE << "NOT tracking kernel writes & reads\n";
@@ -385,7 +385,7 @@ bool init_plugin(void *self) {
     // to monitor osi libs for asid of interest
     PPP_REG_CB("asidstory", on_proc_change, process_changed);
 
-    panda_cb pcb; 
+    panda_cb pcb;
 
     pcb.before_block_translate = maybe_enable_taint;
     panda_register_callback(self, PANDA_CB_BEFORE_BLOCK_TRANSLATE, pcb);
@@ -424,7 +424,7 @@ bool getCodeOffset(target_ptr_t pc, vector<OsiModule> &modules, Panda__CodeOffse
     return false;
 }
 
-    
+
 
 // you have a sequence of lists of libraries loaded for the_asid We'll
 // choose to believe that the one this far down (temporally) in the
@@ -465,11 +465,11 @@ void uninit_plugin(void *) {
             pandalog_write_entry(&ple);
         }
         else {
-            cout << TSM_PRE << " flow (" 
+            cout << TSM_PRE << " flow ("
                  << co_src->name << "," << hex << co_src->offset << ")"
-                 << " --> (" 
+                 << " --> ("
                  << co_dest->name << "," << hex << co_dest->offset << ")"
                  << "\n";
         }
-    }        
+    }
 }
