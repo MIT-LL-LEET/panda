@@ -28,7 +28,7 @@ class GArrayIterator():
         return ret
 
     def __del__(self):
-        self.cleanup_fn(self.garray)
+        self.cleanup_func(self.garray)
 
 class osi_mixins():
     def get_mappings(self, cpu):
