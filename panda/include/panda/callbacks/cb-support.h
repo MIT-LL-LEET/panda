@@ -138,3 +138,7 @@ void panda_callbacks_after_load(CPUState* env, uint64_t addr, uint64_t data, siz
 void panda_callbacks_before_store(CPUState* env, uint64_t addr, uint64_t data, size_t width, bool isSigned);
 void panda_callbacks_after_store(CPUState* env, uint64_t addr, uint64_t data, size_t width, bool isSigned);
 
+void helper_panda_beforeafter_load32(uint32_t addrlo, uint32_t addrhi, uint32_t datalo, uint32_t datahi, size_t width, bool isSigned, bool isPre, void* cpu);
+void helper_panda_beforeafter_load64(uint64_t addrlo, uint64_t datalo, size_t width, bool isSigned, bool isPre, void* cpu);
+void helper_panda_beforeafter_store32(uint32_t addrlo, uint32_t addrhi, uint32_t datalo, uint32_t datahi, size_t width, bool isSigned, bool isPre, void* cpu);
+void helper_panda_beforeafter_store64(uint64_t addrlo, uint64_t datalo, size_t width, bool isSigned, bool isPre, void* cpu);
