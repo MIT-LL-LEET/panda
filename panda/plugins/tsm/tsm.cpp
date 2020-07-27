@@ -210,7 +210,7 @@ void after_store(CPUState *cpu, uint64_t addr, uint64_t data, size_t size, bool 
     // obtain data just stored
     int size32max = (size < 32) ? size : 32;
     uint8_t read_buf[32];
-    int rv = panda_virtual_memory_read(cpu, addr, read_buf, size);
+    int rv = panda_virtual_memory_read(cpu, addr, read_buf, size32max);
     if (rv == -1) {
         // not there. is that even possible?
         return;
