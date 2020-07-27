@@ -207,6 +207,8 @@ void after_store(CPUState *cpu, uint64_t addr, uint64_t data, size_t size, bool 
     if (!track_kernel)
         if (panda_in_kernel(cpu)) return;
 
+    size /= 8;
+
     // obtain data just stored
     int size32max = (size < 32) ? size : 32;
     uint8_t read_buf[32];
@@ -268,6 +270,8 @@ void before_load(CPUState *cpu, uint64_t addr, uint64_t data, size_t size, bool 
 
     if (!track_kernel)
         if (panda_in_kernel(cpu)) return;
+
+    size /= 8;
 
     // obtain data about to be loaded
     int size32max = (size < 32) ? size : 32;
