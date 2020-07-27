@@ -102,7 +102,9 @@ const static std::set<std::string> ignore_funcs{
     "helper_ret_stq_mmu_panda", "helper_ret_stl_mmu_panda", "helper_ret_stw_mmu_panda",
     "helper_ret_stb_mmu_panda",
     "helper_inb", "helper_inw", "helper_inl", "helper_inq",
-    "helper_outb", "helper_outw", "helper_outl", "helper_outq"
+    "helper_outb", "helper_outw", "helper_outl", "helper_outq",
+    "helper_panda_beforeafter_load32", "helper_panda_beforeafter_load64",
+    "helper_panda_beforeafter_store32", "helper_panda_beforeafter_store64"
 };
 void PandaHelperCallVisitor::visitCallInst(CallInst &I) {
     Function *f = I.getCalledFunction();
