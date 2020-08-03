@@ -1,16 +1,12 @@
 
-
-
-
-message CodeOffset {
-    required string name = 1;
-    required uint32 offset = 2;
+message CodePoint {
+    required uint64 asid = 1;
+    required uint64 pc = 2;
 }
 
-
 message TaintFlow {
-    required CodeOffset src = 1;
-    required CodeOffset dest = 2;
+    required CodePoint src = 1;
+    required CodePoint dest = 2;
 }
 
 
