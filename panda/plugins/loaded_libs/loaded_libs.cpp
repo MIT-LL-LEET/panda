@@ -109,6 +109,11 @@ void uninit_plugin(void *self) {
         int i, idx;
         i = idx = 0; 
         // We're going to choose the one with the most amount of loaded modules 
+        idx = (all_module_list.size()) * 0.75;
+        printf ("idx = %d of %d \n", idx, (int) all_module_list.size());
+        max_size = all_module_list[idx].size();
+
+/*
         for (auto module_list : all_module_list) { 
             if (module_list.size() > max_size) { 
                 max_size = module_list.size();
@@ -116,7 +121,7 @@ void uninit_plugin(void *self) {
             }
             i++;
         }
-
+*/
         Panda__LoadedLibs * ll = (Panda__LoadedLibs *) malloc (sizeof (Panda__LoadedLibs)); 
         *ll = PANDA__LOADED_LIBS__INIT; 
 
