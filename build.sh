@@ -8,7 +8,11 @@ if [ $# -ge 1 ]; then
     if [ "$1" = "small" ]; then
         TARGET_LIST="i386-softmmu"
     else
-        TARGET_LIST="$1"
+        if [[ "$1" == *"-softmmu" ]]; then
+            TARGET_LIST="$1"
+        else
+            TARGET_LIST="$1-softmmu"
+        fi
     fi
     echo "Building PANDA for target(s): $TARGET_LIST"
     shift
@@ -183,6 +187,7 @@ msg "Configuring PANDA..."
 "${PANDA_DIR_REL}/configure" \
     --target-list=$TARGET_LIST \
     --prefix=$prefix \
+    --enable-debug \
     $COMPILER_CONFIG \
     $LLVM_CONFIG \
     $MISC_CONFIG \
