@@ -103,52 +103,34 @@ void uninit_plugin(void *self) {
 
     for (auto kvp : asid_module_list) { 
         auto asid = kvp.first;
-        auto all_module_list = kvp.second; // vector<vector<OsiModule>>
-        cout << "asid=" << hex << asid << " has " << dec << all_module_list.size() << "modules\n";
-        int max_size = 0; 
-        int i, idx;
-        i = idx = 0; 
-        // We're going to choose the one with the most amount of loaded modules 
-        idx = (all_module_list.size()) * 0.75;
-        printf ("idx = %d of %d \n", idx, (int) all_module_list.size());
-        max_size = all_module_list[idx].size();
-
-/*
-        for (auto module_list : all_module_list) { 
-            if (module_list.size() > max_size) { 
-                max_size = module_list.size();
-                idx = i; 
+        auto all_module_lists = kvp.second; // vector<vector<OsiModule>>
+        for (auto module_list : all_module_lists) {            
+            Panda__LoadedLibs *ll = (Panda__LoadedLibs *) malloc (sizeof (Panda__LoadedLibs)); 
+            *ll = PANDA__LOADED_LIBS__INIT; 
+            Panda__Module** m = (Panda__Module **) malloc (sizeof (Panda__Module *) * module_list.size());  
+            int i = 0; 
+            for (auto module : module_list) {
+                m[i] = (Panda__Module *) malloc (sizeof (Panda__Module)); 
+                *(m[i]) = PANDA__MODULE__INIT; 
+                m[i]->name = module.name; 
+                m[i]->file = module.file;
+                m[i]->base_addr = module.base; 
+                m[i]->size = module.size; 
+                i++;
             }
-            i++;
+            ll->modules = m;  
+            ll->n_modules = module_list.size();
+            Panda__LogEntry ple = PANDA__LOG_ENTRY__INIT; 
+            ple.has_asid = 1;
+            ple.asid = asid;
+            ple.asid_libraries =  ll; 
+            pandalog_write_entry(&ple);         
+            // Free things!
+            for (int i = 0; i < module_list.size(); i++) 
+                free(m[i]); 
+            free(m);
+            free(ll); 
         }
-*/
-        Panda__LoadedLibs * ll = (Panda__LoadedLibs *) malloc (sizeof (Panda__LoadedLibs)); 
-        *ll = PANDA__LOADED_LIBS__INIT; 
-
-        Panda__Module** m = (Panda__Module **) malloc (sizeof (Panda__Module *) * max_size);  
-        i = 0; 
-        for (auto module : all_module_list[idx]) {
-            m[i] = (Panda__Module *) malloc (sizeof (Panda__Module)); 
-            *(m[i]) = PANDA__MODULE__INIT; 
-            m[i]->name = module.name; 
-            m[i]->file = module.file;
-            m[i]->base_addr = module.base; 
-            m[i]->size = module.size; 
-            i++;
-        }
-        ll->modules = m;  
-        ll->n_modules = max_size;   
-        Panda__LogEntry ple = PANDA__LOG_ENTRY__INIT; 
-        ple.has_asid = 1;
-        ple.asid = asid;
-        ple.asid_libraries =  ll; 
-        pandalog_write_entry(&ple); 
-
-        // Free things!
-        for (int i = 0; i < max_size; i++) 
-            free(m[i]); 
-        free(m);
-        free(ll); 
 
     }
 }
