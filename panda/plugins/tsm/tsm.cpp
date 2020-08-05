@@ -92,6 +92,12 @@ struct Flow {
     }
 };
 
+struct FlowStats {
+    uint64_t count;       // number of observations of this flow
+    uint64_t min_instr;   // min instr count for this flow
+    uint64_t max_instr;   // max instr count for this flow
+};
+
 
 // taint labels map to WriteInfo structs
 map<WriteInfo, TaintLabel> wi2l;
@@ -104,7 +110,7 @@ bool track_kernel = false;
 uint64_t first_taint_instr = 0;
 
 // collect & count flows between src and dest code points
-map<Flow, uint64_t> flows;
+map<Flow, FlowStats> flows;
 
 // used to spit out diag msg every 1% of replay
 double next_replay_percent = 0.0;
@@ -112,7 +118,7 @@ double next_replay_percent = 0.0;
 // count flows we observe (not unique)
 uint64_t num_flows = 0;
 
-bool debug = true;
+bool debug = false;
 
 
 // just used to turn on taint, sadly 
@@ -280,7 +286,17 @@ void before_load(CPUState *cpu, uint64_t addr, uint64_t data, size_t size, bool 
             cout << TSM_PRE << " before_load: flow observed from(asid=" << hex << wi.asid << ",pc=" << wi.pc << ")";
             cout << " -> to(asid=" << hex << asid << ",pc=" << pc << ")\n";
         }
-        flows[f]++;
+        uint64_t instr = rr_get_guest_instr_count();
+        FlowStats fs;
+        if (flows.count(f) == 0) {
+            fs = {1, instr, instr};
+        }
+        else {
+            fs = flows[f];
+            fs.count ++;
+            fs.max_instr = instr;
+        }
+        flows[f] = fs;
         // not unique flows 
         num_flows ++;
     }
@@ -358,6 +374,7 @@ void uninit_plugin(void *) {
     *tf = PANDA__TAINT_FLOW__INIT;
     for (auto kvp : flows) {
         auto flow = kvp.first;
+        FlowStats fs = kvp.second;
         if (pandalog) {
             cp_src->asid = flow.src_asid;
             cp_src->pc = flow.src_pc;
@@ -365,6 +382,9 @@ void uninit_plugin(void *) {
             cp_dest->pc = flow.dest_pc;
             tf->src = cp_src;
             tf->dest = cp_dest;
+            tf->count = fs.count;
+            tf->min_instr = fs.min_instr;
+            tf->max_instr = fs.max_instr;
             Panda__LogEntry ple = PANDA__LOG_ENTRY__INIT;
             ple.taint_flow = tf;
             pandalog_write_entry(&ple);
