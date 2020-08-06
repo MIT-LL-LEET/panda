@@ -18,13 +18,14 @@ plog_to_pandelephant.py db_url plog
 
 class Process:
 
-    def __init__(self, name, pid, asid):
+    def __init__(self, name, pid, asid, create_time):
         self.name = name
         self.pid = pid
         self.asid = asid
+        self.create_time = create_time
         
     def __repr__(self):
-        return ("Process(name=%s,pid=%d,asid=0x%x)" % (self.name, self.pid, self.asid))
+        return ("Process(name=%s,pid=%d,asid=0x%x,create_time=%s)" % (self.name, self.pid, self.asid, str(self.create_time)))
 
     def __hash__(self):
         return (hash(self.__repr__()))
@@ -89,11 +90,17 @@ if __name__ == "__main__":
 
 
     parser = argparse.ArgumentParser(description="ingest pandalog and tranfer results to pandelephant")
-    
+    parser.add_argument("exec_start", "--exec-start", help="Start time for execution", action="store", default=None)
+    parser.add_argument("exec_end", "--exec-end", help="End time for execution", action="store", default=None)
 
+    # must have this
+    parser.add_argument("exec_name", "--exec-name", help="A name for the execution", action="store", required=True)
+
+    args = parser.parse_args()
     db = pe.init_and_create_session(sys.argv[1], debug=True)
 
-
+    ex = pe.Execution(name=args.exec_name, start_time=args.exec_start, end_time=args.exec_end)
+    db.add(ex)
 
     asidinfos = []
     asidlibss = {}
