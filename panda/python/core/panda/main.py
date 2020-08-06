@@ -1,5 +1,8 @@
-import sys
+"""
+The main module is a container for the Panda class.
+"""
 
+import sys
 
 if sys.version_info[0] < 3:
     print("Please run with Python 3!")
@@ -27,6 +30,7 @@ from .plugin_list import plugin_list
 
 # Mixins to extend Panda class functionality
 from .libpanda_mixins   import libpanda_mixins
+from .libqemu_mixins    import libqemu_mixins
 from .blocking_mixins   import blocking_mixins
 from .osi_mixins        import osi_mixins
 from .hooking_mixins    import hooking_mixins
@@ -38,7 +42,29 @@ from .gdb_mixins        import gdb_mixins
 
 import pdb
 
-class Panda(libpanda_mixins, blocking_mixins, osi_mixins, hooking_mixins, callback_mixins, taint_mixins, volatility_mixins, pyperipheral_mixins, gdb_mixins):
+class Panda(libpanda_mixins, libqemu_mixins, blocking_mixins, osi_mixins, hooking_mixins, callback_mixins, taint_mixins, volatility_mixins, pyperipheral_mixins, gdb_mixins):
+    """
+    This is the object used to interact with PANDA. Initializing it creates a virtual machine to interact with.
+
+    It attempts to be less complicated by using mixins. All mixin methods are avaiable to the main PANDA object.
+
+        Attributes:
+            arch : architecture string (e.g. "i386", "x86_64", "arm", "mips", "mipsel")
+            mem : size of memory for machine (e.g. "128M", "1G")
+            expect_prompt : Regular expression describing the prompt exposed by the guest 
+                on a serial console. Used so we know when a running command has finished 
+                with its output.
+            os_version : analagous to -os string.
+            qcow : qcow file to load as a path
+            os : type of OS (e.g. "linux")
+            generic : specify a generic qcow to use and set other arguments. Supported 
+                values: arm/ppc/x86_64/i386. Will download qcow automatically
+            raw_monitor : When set, don't specify a -monitor. arg Allows for use of 
+                -nographic in args with ctrl-A+C for interactive qemu prompt.
+            extra_args : extra arguments to pass to PANDA as either a string or an 
+                array. (e.g. "-nographic" or ["-nographic", "-net", "none"])
+
+    """
     def __init__(self, arch="i386", mem="128M",
             expect_prompt=None, # Regular expression describing the prompt exposed by the guest on a serial console. Used so we know when a running command has finished with its output
             os_version=None,
@@ -64,6 +90,7 @@ class Panda(libpanda_mixins, blocking_mixins, osi_mixins, hooking_mixins, callba
             q = qcows.get_qcow_info(generic)
             self.arch     = q.arch
             self.os       = q.os
+            self.mem      = q.default_mem # Might clobber a specified argument, but required if you want snapshots
             self.qcow     = qcows.get_qcow(generic)
             self.expect_prompt = q.prompt
             if q.extra_args:
@@ -73,7 +100,7 @@ class Panda(libpanda_mixins, blocking_mixins, osi_mixins, hooking_mixins, callba
             #if self.qcow == "default": # Use arch / mem / os to find a qcow - XXX: merge with generic?
             #    self.qcow = pjoin(getenv("HOME"), ".panda", "%s-%s-%s.qcow" % (self.os, self.arch, mem))
             if not (exists(self.qcow)):
-                print("Missing qcow '{}' Please go create that qcow and give it to moyix!".format(self.qcow))
+                print("Missing qcow '{}' Please go create that qcow and give it to the PANDA maintainers".format(self.qcow))
 
         self.build_dir  = self._find_build_dir()
         environ["PANDA_DIR"] = self.build_dir
@@ -101,7 +128,7 @@ class Panda(libpanda_mixins, blocking_mixins, osi_mixins, hooking_mixins, callba
         self.panda_args += extra_args
 
         # Configure memory options
-        self.panda_args.extend(['-m', mem])
+        self.panda_args.extend(['-m', self.mem])
 
         # Configure serial - if we have an expect_prompt set. Otherwise how can we know what guest cmds are outputting?
         if self.expect_prompt:
@@ -166,7 +193,7 @@ class Panda(libpanda_mixins, blocking_mixins, osi_mixins, hooking_mixins, callba
         After initializing the class, the user has a chance to do something
         (TODO: what? register callbacks? It's something important...) before we finish initializing
         '''
-        self.libpanda.panda_set_library_mode(True)
+        self.libpanda._panda_set_library_mode(True)
 
         cenvp = ffi.new("char**", ffi.new("char[]", b""))
         len_cargs = ffi.cast("int", len(self.panda_args))
@@ -271,6 +298,9 @@ class Panda(libpanda_mixins, blocking_mixins, osi_mixins, hooking_mixins, callba
         self.main_loop_wait_fnargs.append((fn, args))
 
     def exit_cpu_loop(self):
+        '''
+        Stop cpu execution at nearest juncture.
+        '''
         self.libpanda.panda_exit_loop = True
 
     def revert_async(self, snapshot_name): # In the next main loop, revert
@@ -292,7 +322,8 @@ class Panda(libpanda_mixins, blocking_mixins, osi_mixins, hooking_mixins, callba
         if debug:
             self.queue_main_loop_wait_fn(self.finish_timer, [timer_start, "Loaded snapshot"])
 
-    def reset(self): # In the next main loop, reset to boot
+    def reset(self): 
+        """In the next main loop, reset to boot"""
         if debug:
             progress ("Resetting machine to start state")
 
@@ -301,14 +332,17 @@ class Panda(libpanda_mixins, blocking_mixins, osi_mixins, hooking_mixins, callba
         self.queue_main_loop_wait_fn(self.libpanda.panda_reset)
         self.queue_main_loop_wait_fn(self.libpanda.panda_cont)
 
-    def cont(self): # Continue execution (run after vm_stop)
+    def cont(self):
+        ''' Continue execution (run after vm_stop) '''
         self.libpanda.panda_cont()
         self.running.set()
 
-    def vm_stop(self, code=4): # Stop execution, default code means RUN_STATE_PAUSED
+    def vm_stop(self, code=4):
+        ''' Stop execution, default code means RUN_STATE_PAUSED '''
         self.libpanda.panda_stop(code)
 
     def snap(self, snapshot_name):
+        ''' Create snapshot with specified name '''
         if debug:
             progress ("Creating snapshot " + snapshot_name)
 
@@ -322,6 +356,7 @@ class Panda(libpanda_mixins, blocking_mixins, osi_mixins, hooking_mixins, callba
             self.queue_main_loop_wait_fn(self.finish_timer, [timer_start, "Saved snapshot"])
 
     def delvm(self, snapshot_name):
+        ''' Delete snapshot with specified name '''
         if debug:
             progress ("Deleting snapshot " + snapshot_name)
 
@@ -331,20 +366,20 @@ class Panda(libpanda_mixins, blocking_mixins, osi_mixins, hooking_mixins, callba
         self.queue_main_loop_wait_fn(self.libpanda.panda_delvm, [charptr])
 
     def finish_timer(self, start, msg):
-        '''
-        Print how long some (main_loop_wait) task took
-        '''
+        ''' Print how long some (main_loop_wait) task took '''
         t = time() - start
         print("{} in {1:.08f} seconds".format(msg, t))
 
 
     def enable_tb_chaining(self):
+        ''' This function enables translation block chaining in QEMU '''
         if debug:
             progress("Enabling TB chaining")
         self.disabled_tb_chaining = False
         self.libpanda.panda_enable_tb_chaining()
 
     def disable_tb_chaining(self):
+        ''' This function disables translation block chaining in QEMU '''
         if not self.disabled_tb_chaining:
             if debug:
                 progress("Disabling TB chaining")
@@ -353,8 +388,10 @@ class Panda(libpanda_mixins, blocking_mixins, osi_mixins, hooking_mixins, callba
 
     def run(self):
         '''
-        Start execution of guest. Blocks until guest finishes.
-        Initializes panda object, clears main_loop_wait fns, sets up internal callbacks
+        This function starts our running PANDA instance from Python. At termination this function returns and the script continues to run after it.
+        
+        This function starts execution of the guest. It blocks until guest finishes.
+        It also initializes panda object, clears main_loop_wait fns, and sets up internal callbacks.
         '''
 
         if len(self.main_loop_wait_fnargs):
@@ -381,6 +418,8 @@ class Panda(libpanda_mixins, blocking_mixins, osi_mixins, hooking_mixins, callba
 
     def end_analysis(self):
         '''
+        Stop running machine.
+
         Call from any thread to unload all plugins and stop all queued functions.
         If called from async thread or a callback, it will also unblock panda.run()
 
@@ -395,7 +434,13 @@ class Panda(libpanda_mixins, blocking_mixins, osi_mixins, hooking_mixins, callba
 
     def run_replay(self, replaypfx):
         '''
-        Load a replay and run it
+        Load a replay and run it. Starts PANDA execution and returns after end of VM execution.
+
+            Parameters:
+                replaypfx: python string path to replay file.
+        
+            Returns:
+                None
         '''
         if not isfile(replaypfx+"-rr-snp") or not isfile(replaypfx+"-rr-nondet.log"):
             raise ValueError("Replay files not present to run replay of {}".format(replaypfx))
@@ -416,6 +461,13 @@ class Panda(libpanda_mixins, blocking_mixins, osi_mixins, hooking_mixins, callba
     def load_plugin(self, name, args={}):
         '''
         Load a C plugin, optionally with arguments
+
+            Parameters:
+                name: python string name of plugin
+                args: Dictionary of arguments matching key to value. e.g. {"key": "value"} sets option key to value.
+            
+            Returns:
+                None.
         '''
         if debug:
             progress ("Loading plugin %s" % name),
@@ -449,9 +501,9 @@ class Panda(libpanda_mixins, blocking_mixins, osi_mixins, hooking_mixins, callba
 
         charptr = ffi.new("char[]", bytes(name,"utf-8"))
         self.libpanda.panda_require_from_library(charptr, plugin_args, len(argstrs_ffi))
-        self.load_plugin_library(name)
+        self._load_plugin_library(name)
 
-    def procname_changed(self, name):
+    def _procname_changed(self, name):
         for cb_name, cb in self.registered_callbacks.items():
             if not cb["procname"]:
                 continue
@@ -463,6 +515,15 @@ class Panda(libpanda_mixins, blocking_mixins, osi_mixins, hooking_mixins, callba
             self.update_hooks_new_procname(name)
 
     def unload_plugin(self, name):
+        '''
+        Unload plugin with given name.
+
+            Parameters:
+                name: python string name of plugin
+        
+            Returns:
+                None
+        '''
         if debug:
             progress ("Unloading plugin %s" % name),
         name_ffi = ffi.new("char[]", bytes(name,"utf-8"))
@@ -487,15 +548,27 @@ class Panda(libpanda_mixins, blocking_mixins, osi_mixins, hooking_mixins, callba
         # Then unload C plugins. May be unsafe to do except from the top of the main loop (taint segfaults otherwise)
         self.queue_main_loop_wait_fn(self.libpanda.panda_unload_plugins)
 
-    def rr_get_guest_instr_count(self):
-        return self.libpanda.rr_get_guest_instr_count_external()
-
     def memsavep(self, file_out):
-        newfd = dup(f_out.fileno())
+        '''
+        Calls QEMU memsavep on your specified python file.
+        '''
+        newfd = dup(file_out.fileno())
         self.libpanda.panda_memsavep(newfd)
         self.libpanda.fclose(newfd)
 
     def current_sp(self, cpustate): # under construction
+        '''
+        Returns the current stack pointer for your target.
+
+            Parameters:
+                cpustate: CPUState structure
+        
+            Returns:
+                Stack pointer as python integer.
+        
+            Raises:
+                NotImplemented error if architecture isn't supported.
+        '''
         if self.arch == "i386":
             # XXX see far more complex logic in panda/include/panda/common.h
             from panda.x86.helper import R_ESP
@@ -507,27 +580,65 @@ class Panda(libpanda_mixins, blocking_mixins, osi_mixins, hooking_mixins, callba
             raise NotImplemented("current_sp doesn't yet support arch {}".format(self.arch))
 
     def physical_memory_read(self, addr, length, fmt='bytearray'):
+        '''
+        Read guest physical memory.
+
+            Parameters:
+                addr: python int address
+                length: length of array you would like returned
+                fmt: format for returned array. Options: 'bytearray', 'int', and 'str'
+
+            Returns:
+                Buffer based on fmt string
+        
+            Raises:
+                ValueError for two cases: 
+                    Memory Access with error value.
+                    Format string is incorrect.
+        '''
         return self._memory_read(None, addr, length, physical=True, fmt=fmt)
 
     def virtual_memory_read(self, env, addr, length, fmt='bytearray'):
+        '''
+        Read guest virtual memory.
+
+            Parameters:
+                    env: CPUState structure
+                    addr: python int address
+                    length: length of array you would like returned
+                    fmt: format for returned array. Options: 'bytearray', 'int', and 'str'
+            
+            Returns:
+                    Buffer based on fmt string
+            
+            Raises:
+                    ValueError for two cases: 
+                        Memory Access with error value.
+                        Format string is incorrect.
+        '''
         return self._memory_read(env, addr, length, physical=False, fmt=fmt)
 
     def _memory_read(self, env, addr, length, physical=False, fmt='bytearray'):
         '''
-        Read but with an autogen'd buffer. Returns a tuple (data, error code)
+        Read but with an autogen'd buffer
         Supports physical or virtual addresses
-        Error code is 0 on success, negative on failure
+        Raises ValueError if read fails
         '''
         if not hasattr(self, "_memcb"): # XXX: Why do we enable memcbs for memory writes?
             self.enable_memcb()
         buf = ffi.new("char[]", length)
 
+        # Force CFFI to parse addr as an unsigned value. Otherwise we get OverflowErrors
+        # when it decides that it's negative
+        ptr_typ = f'uint{self.bits}_t'
+        addr_u = int(ffi.cast(ptr_typ, addr))
+
         buf_a = ffi.cast("char*", buf)
         length_a = ffi.cast("int", length)
         if physical:
-            err = self.libpanda.panda_physical_memory_read_external(addr, buf_a, length_a)
+            err = self.libpanda.panda_physical_memory_read_external(addr_u, buf_a, length_a)
         else:
-            err = self.libpanda.panda_virtual_memory_read_external(env, addr, buf_a, length_a)
+            err = self.libpanda.panda_virtual_memory_read_external(env, addr_u, buf_a, length_a)
 
         if err < 0:
             raise ValueError(f"Memory access failed with err={err}") # TODO: make a PANDA Exn class
@@ -539,13 +650,45 @@ class Panda(libpanda_mixins, blocking_mixins, osi_mixins, hooking_mixins, callba
             return int.from_bytes(r, byteorder=self.endianness)  # XXX size better be small enough to pack into an int!
         elif fmt=='str':
             return ffi.string(buf, length)
+        elif fmt=='ptrlist':
+            # This one is weird. Chunmk the memory into byte-sequences of (self.bits/8) bytes and flip endianness as approperiate
+            # return a list
+            bytelen = int(self.bits/8)
+            if (length % bytelen != 0):
+                raise ValueError(f"Memory of size {length} does not evenly divide into {bytelen} byte chunks")
+            chunks = []
+            for start in range(0, length, bytelen):
+                data = r[start:start+bytelen]
+                int_data = int.from_bytes(data, byteorder=self.endianness)
+                chunks.append(int_data)
+            return chunks
+
         else:
             raise ValueError("fmt={} unsupported".format(fmt))
 
     def physical_memory_write(self, addr, buf):
+        '''
+        Write guest physical memory.
+
+            Parameters:
+                    addr: python int address
+                    buf:  byte string to write
+        '''
         return self._memory_write(None, addr, buf, physical=True)
 
     def virtual_memory_write(self, env, addr, buf):
+        '''
+        Write guest virtual memory.
+        
+            Parameters:
+                    env: CPUState structure
+                    address: python int address
+                    buf: byte string to write
+            
+            Returns:
+                    int: 0 on success. 1 on error.
+
+        '''
         return self._memory_write(env, addr, buf, physical=False)
 
     def _memory_write(self, env, addr, buf, physical=False):
@@ -566,6 +709,9 @@ class Panda(libpanda_mixins, blocking_mixins, osi_mixins, hooking_mixins, callba
             return self.libpanda.panda_virtual_memory_write_external(env, addr, buf_a, length_a)
 
     def callstack_callers(self, lim, cpu): # XXX move into new directory, 'callstack' ?
+        '''
+        Utility function to handle conversion and return get_callers from callstack_instr.
+        '''
         if not "plugin_callstack_instr" in self.plugins:
             progress("enabling callstack_instr plugin")
             self.require("callstack_instr")
@@ -577,7 +723,7 @@ class Panda(libpanda_mixins, blocking_mixins, osi_mixins, hooking_mixins, callba
             c.append(pc)
         return c
 
-    def load_plugin_library(self, name):
+    def _load_plugin_library(self, name):
         if hasattr(self,"__did_load_libpanda"):
             libpanda_path_chr = ffi.new("char[]",bytes(self.libpanda_path, "UTF-8"))
             self.__did_load_libpanda = self.libpanda.panda_load_libpanda(libpanda_path_chr)
@@ -587,9 +733,28 @@ class Panda(libpanda_mixins, blocking_mixins, osi_mixins, hooking_mixins, callba
             self.plugins[name] = library
 
     def queue_async(self, f, internal=False):
+        '''
+        Queues work in the asynchronous work queue.
+
+            Parameters:
+                f: A python function with no arguments to be called at a later date
+            
+            Returns:
+                None
+        '''
         self.athread.queue(f, internal=internal)
 
     def map_memory(self, name, size, address):
+
+        '''
+        Make a new memory region.
+        
+            Parameters:
+                    name: This is an internal reference name for this region. Must be unique.
+                    size: number of bytes the region should be.
+                    address: start address of region
+        '''
+
         name_c = ffi.new("char[]", bytes(name, "utf-8"))
         size = ceil(size/1024)*1024 # Must be page-aligned
         return self.libpanda.map_memory(name_c, size, address)
@@ -631,5 +796,6 @@ class Panda(libpanda_mixins, blocking_mixins, osi_mixins, hooking_mixins, callba
             return (x - 2**self.bits)
         else: # Else it's positive
             return x
+
 
 # vim: expandtab:tabstop=4:
