@@ -1,6 +1,19 @@
 
-import sys
+import pandelephant.pandelephant as pe
 from plog_reader import PLogReader
+
+from datetime import datetime
+import argparse
+import time
+import sys
+
+
+"""
+plog_to_pandelephant.py db_url plog
+
+
+
+"""
 
 
 class Process:
@@ -73,6 +86,14 @@ class AsidLibs:
 
 
 if __name__ == "__main__":
+
+
+    parser = argparse.ArgumentParser(description="ingest pandalog and tranfer results to pandelephant")
+    
+
+    db = pe.init_and_create_session(sys.argv[1], debug=True)
+
+
 
     asidinfos = []
     asidlibss = {}
