@@ -1026,6 +1026,7 @@ struct task_info {
 	int comm_offset;			/**< Offset of the command name in `struct task_struct`. */
 	size_t comm_size;			/**< Size of the command name. */
 	int files_offset;			/**< Offset for open files information. */
+        int start_time_offset;                  /** offset of start_time */
 };
 
 /**
@@ -1128,9 +1129,9 @@ struct kernelinfo {
 // from panda_api.c
 int panda_init(int argc, char **argv, char **envp);
 int panda_run(void);
-void panda_set_library_mode(bool);
 void panda_stop(int code);
 void panda_cont(void);
+void _panda_set_library_mode(const bool);
 int panda_delvm(char *snapshot_name);
 void panda_start_pandalog(const char *name);
 int panda_revert(char *snapshot_name);

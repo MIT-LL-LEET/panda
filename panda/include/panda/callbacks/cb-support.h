@@ -142,3 +142,5 @@ void helper_panda_beforeafter_load32(uint32_t addrlo, uint32_t addrhi, uint32_t 
 void helper_panda_beforeafter_load64(uint64_t addrlo, uint64_t datalo, size_t width, bool isSigned, bool isPre, void* cpu);
 void helper_panda_beforeafter_store32(uint32_t addrlo, uint32_t addrhi, uint32_t datalo, uint32_t datahi, size_t width, bool isSigned, bool isPre, void* cpu);
 void helper_panda_beforeafter_store64(uint64_t addrlo, uint64_t datalo, size_t width, bool isSigned, bool isPre, void* cpu);
+
+void panda_callbacks_before_tcg_codegen(CPUState *env, TranslationBlock *tb);

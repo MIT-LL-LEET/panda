@@ -1,3 +1,7 @@
+"""
+Utilities to provide blocking interactions with PANDA. This includes serial and monitor interactions as well as file copy to the guest.
+"""
+
 # XXX: Do not call any of the following from the main thread- they depend on the CPU loop running
 from .decorators import blocking
 from .utils import progress, make_iso, debug
@@ -62,7 +66,7 @@ class blocking_mixins():
 
         copy_directory = path.split(copy_directory)[-1] # Get dirname
 
-        # 1) we insert the CD drive
+        # 1) we insert the CD drive TODO: the cd-drive name should be a config option, see the values in qcow.py
         self.run_monitor_cmd("change ide1-cd0 \"{}\"".format(iso_name))
 
         # 2) run setup script
@@ -173,3 +177,14 @@ class blocking_mixins():
                     break
             r = self.run_serial_cmd(cmd) # XXX: may timeout
             print(r)
+
+    @blocking
+    def do_panda_finish(self):
+        '''
+        Call panda_finish. Note this isn't really blocking - the
+        guest should have exited by now, but queue this after
+        (blocking) shutdown commands in our internal async queue
+        so it must also be labeled as blocking.
+        '''
+#        assert (not self.running.is_set()), "Can't finish while still running"
+        self.panda_finish()
