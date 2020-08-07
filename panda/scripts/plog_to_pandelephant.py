@@ -18,14 +18,14 @@ plog_to_pandelephant.py db_url plog
 
 class Process:
 
-    def __init__(self, name, pid, asid, create_time):
-        self.name = name
+    def __init__(self, names, pid, asid, create_time):
+        self.names = names
         self.pid = pid
         self.asid = asid
         self.create_time = create_time
         
     def __repr__(self):
-        return ("Process(name=%s,pid=%d,asid=0x%x,create_time=%s)" % (self.name, self.pid, self.asid, str(self.create_time)))
+        return ("Process(names=[%s],pid=%d,asid=0x%x,create_time=%s)" % (self.names, self.pid, self.asid, str(self.create_time)))
 
     def __hash__(self):
         return (hash(self.__repr__()))
@@ -37,7 +37,7 @@ class Process:
 class AsidInfo:
 
     def __init__ (self, m):
-        self.process = Process(m.name, m.pid, m.asid, m.create_time)
+        self.process = Process(m.names, m.pid, m.asid, m.create_time)
         self.range = (m.start_instr, m.end_instr)
 
     def __repr__(self):
@@ -90,14 +90,16 @@ if __name__ == "__main__":
 
 
     parser = argparse.ArgumentParser(description="ingest pandalog and tranfer results to pandelephant")
-    parser.add_argument("exec_start", "--exec-start", help="Start time for execution", action="store", default=None)
-    parser.add_argument("exec_end", "--exec-end", help="End time for execution", action="store", default=None)
+    parser.add_argument("-db_url", help="db url", action="store")
+    parser.add_argument("-pandalog", help="pandalog", action="store")    
+    parser.add_argument("-exec_start", "--exec-start", help="Start time for execution", action="store", default=None)
+    parser.add_argument("-exec_end", "--exec-end", help="End time for execution", action="store", default=None)
 
     # must have this
-    parser.add_argument("exec_name", "--exec-name", help="A name for the execution", action="store", required=True)
+    parser.add_argument("-exec_name", "--exec-name", help="A name for the execution", action="store", required=True)
 
     args = parser.parse_args()
-    db = pe.init_and_create_session(sys.argv[1], debug=True)
+    db = pe.init_and_create_session(db_url, debug=True)
 
     ex = pe.Execution(name=args.exec_name, start_time=args.exec_start, end_time=args.exec_end)
     db.add(ex)
@@ -108,7 +110,7 @@ if __name__ == "__main__":
     process_modules = {}
 
     # first obtain asidinfo and libraries entries
-    with PLogReader(sys.argv[1]) as plr:
+    with PLogReader(args.pandalog) as plr:
         for i, m in enumerate(plr):
             if m.HasField("asid_info"):
                 ai = AsidInfo(m.asid_info)
@@ -141,15 +143,15 @@ if __name__ == "__main__":
         idx = int(0.75 * (len(asidlibss[process.asid])))
         asidlibs=asidlibss[process.asid][idx]
         db_modules = []
-        for (name, module) in asidlibs.modules.keys():
+        for (name, module) in asidlibs.modules.items():
             print(asidlibs.modules[name])
             db_module = pe.Module(name=module.name, path=module.file, \
                                   base=module.base, size=module.size)
             db_modules.append(db_module)                                  
         db_proc = pe.Process(execution=ex, names=p.names, asid=p.asid, \
                              pid=p.pid, ppid=p.ppid, tids=p.tids, \
-                             create_time=p.create_time), \
-                             execution=ex, modules=db_modules)
+                             create_time=p.create_time, \
+                             modules=db_modules)
         db.add(db_proc)
         process_modules[process] = asidlibs.modules
 
