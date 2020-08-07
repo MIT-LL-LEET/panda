@@ -37,7 +37,7 @@ class Process:
 class AsidInfo:
 
     def __init__ (self, m):
-        self.process = Process(m.name, m.pid, m.asid)
+        self.process = Process(m.name, m.pid, m.asid, m.create_time)
         self.range = (m.start_instr, m.end_instr)
 
     def __repr__(self):
@@ -112,14 +112,15 @@ if __name__ == "__main__":
         for i, m in enumerate(plr):
             if m.HasField("asid_info"):
                 ai = AsidInfo(m.asid_info)
+                p = ai.process
                 asidinfos.append(ai)
-                processes.add(ai.process)
+                processes.add(p)
             if m.HasField("asid_libraries"):
                 al = AsidLibs(m)
                 if not (al.asid in asidlibss):
                     asidlibss[al.asid] = []
                 asidlibss[al.asid].append(al)
-
+                
 
     if len(asidinfos) == 0:
         print ("No asid_info entries in pandalog -- exiting\n")
@@ -139,8 +140,17 @@ if __name__ == "__main__":
         assert (process.asid in asidlibss)
         idx = int(0.75 * (len(asidlibss[process.asid])))
         asidlibs=asidlibss[process.asid][idx]
-        for name in asidlibs.modules.keys():
+        db_modules = []
+        for (name, module) in asidlibs.modules.keys():
             print(asidlibs.modules[name])
+            db_module = pe.Module(name=module.name, path=module.file, \
+                                  base=module.base, size=module.size)
+            db_modules.append(db_module)                                  
+        db_proc = pe.Process(execution=ex, names=p.names, asid=p.asid, \
+                             pid=p.pid, ppid=p.ppid, tids=p.tids, \
+                             create_time=p.create_time), \
+                             execution=ex, modules=db_modules)
+        db.add(db_proc)
         process_modules[process] = asidlibs.modules
 
     def getModuleOffset(cp):
