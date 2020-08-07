@@ -175,12 +175,7 @@ if __name__ == "__main__":
                 if (src_mo is None) or (dest_mo is None):
                     continue
                 (src_name, src_offs) = src_mo
-                (dest_name, dest_offs) = dest_mo
-                print ("instr="),
-                if tf.min_instr == tf.max_instr:
-                    print (tf.min_instr),
-                else:
-                    print ("(%d..%d)" % (tf.min_instr, tf.max_instr)),
-                print (" count=%d Flow(%s -> %s)" % \
-                       (tf.count, str(src_mo), str(dest_mo)))
+                (dest_name, dest_offs) = dest_mo                
+                print ("instr=" + str(m.instr)),                
+                print (" Flow(%s -> %s(" % (str(src_mo), str(dest_mo)))
                 
