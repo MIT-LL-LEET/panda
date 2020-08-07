@@ -106,6 +106,8 @@ map<uint32_t, WriteInfo> l2wi;
 // true if we are tracking flows into / out of kernel code points
 bool track_kernel = false;
 
+bool summary = false;
+
 // really just indicating if anything has a taint label yet
 uint64_t first_taint_instr = 0;
 
@@ -286,17 +288,37 @@ void before_load(CPUState *cpu, uint64_t addr, uint64_t data, size_t size, bool 
             cout << TSM_PRE << " before_load: flow observed from(asid=" << hex << wi.asid << ",pc=" << wi.pc << ")";
             cout << " -> to(asid=" << hex << asid << ",pc=" << pc << ")\n";
         }
-        uint64_t instr = rr_get_guest_instr_count();
-        FlowStats fs;
-        if (flows.count(f) == 0) {
-            fs = {1, instr, instr};
+        if (summary) {
+            uint64_t instr = rr_get_guest_instr_count();
+            FlowStats fs;
+            if (flows.count(f) == 0) {
+                fs = {1, instr, instr};
+            }
+            else {
+                fs = flows[f];
+                fs.count ++;
+                fs.max_instr = instr;
+            }
+            flows[f] = fs;
         }
         else {
-            fs = flows[f];
-            fs.count ++;
-            fs.max_instr = instr;
+            if (pandalog) {
+                Panda__CodePoint cp_src, cp_dest;
+                cp_src = cp_dest = PANDA__CODE_POINT__INIT;
+                Panda__TaintFlow tf;
+                tf = PANDA__TAINT_FLOW__INIT;
+                cp_src.asid = f.src_asid;
+                cp_src.pc = f.src_pc;
+                cp_dest.asid = f.dest_asid;
+                cp_dest.pc = f.dest_pc;
+                tf.src = &cp_src;
+                tf.dest = &cp_dest;
+                tf.has_count = tf.has_min_instr = tf.has_max_instr = false;
+                Panda__LogEntry ple = PANDA__LOG_ENTRY__INIT;
+                ple.taint_flow = &tf;
+                pandalog_write_entry(&ple);                
+            }
         }
-        flows[f] = fs;
         // not unique flows 
         num_flows ++;
     }
@@ -344,6 +366,11 @@ bool init_plugin(void *self) {
          cout << TSM_PRE << "tracking kernel writes & reads too\n";
      else
          cout << TSM_PRE << "NOT tracking kernel writes & reads\n";
+     summary = panda_parse_bool_opt(args, "summary", "summary output");
+     if (summary) 
+         cout << TSM_PRE << "summary mode is ON\n";
+     else
+         cout << TSM_PRE << "summary mode is OFF\n";
 
     panda_cb pcb;
 
@@ -366,33 +393,37 @@ bool init_plugin(void *self) {
 
 void uninit_plugin(void *) {
 
-    Panda__CodePoint *cp_src  = (Panda__CodePoint *) malloc(sizeof(Panda__CodePoint));
-    *cp_src = PANDA__CODE_POINT__INIT;
-    Panda__CodePoint *cp_dest  = (Panda__CodePoint *) malloc(sizeof(Panda__CodePoint));
-    *cp_dest = PANDA__CODE_POINT__INIT;
-    Panda__TaintFlow *tf = (Panda__TaintFlow *) malloc (sizeof(Panda__TaintFlow));
-    *tf = PANDA__TAINT_FLOW__INIT;
-    for (auto kvp : flows) {
-        auto flow = kvp.first;
-        FlowStats fs = kvp.second;
-        if (pandalog) {
-            cp_src->asid = flow.src_asid;
-            cp_src->pc = flow.src_pc;
-            cp_dest->asid = flow.dest_asid;
-            cp_dest->pc = flow.dest_pc;
-            tf->src = cp_src;
-            tf->dest = cp_dest;
-            tf->count = fs.count;
-            tf->min_instr = fs.min_instr;
-            tf->max_instr = fs.max_instr;
-            Panda__LogEntry ple = PANDA__LOG_ENTRY__INIT;
-            ple.taint_flow = tf;
-            pandalog_write_entry(&ple);
-        }
-        else {
-            cout << TSM_PRE 
-                 << " flow src(asid=" << hex << cp_src->asid << ",pc=" << hex << cp_src->pc << ")"
-                 << " -> dest(asid=" << hex << cp_dest->asid << ",pc=" << hex << cp_dest->pc << ")\n";
+    if (summary) {
+        Panda__CodePoint *cp_src  = (Panda__CodePoint *) malloc(sizeof(Panda__CodePoint));
+        *cp_src = PANDA__CODE_POINT__INIT;
+        Panda__CodePoint *cp_dest  = (Panda__CodePoint *) malloc(sizeof(Panda__CodePoint));
+        *cp_dest = PANDA__CODE_POINT__INIT;
+        Panda__TaintFlow *tf = (Panda__TaintFlow *) malloc (sizeof(Panda__TaintFlow));
+        *tf = PANDA__TAINT_FLOW__INIT;
+        cout << (flows.size()) << " unique flows -- pandalogging\n";
+        for (auto kvp : flows) {
+            auto flow = kvp.first;
+            FlowStats fs = kvp.second;
+            if (pandalog) {
+                cp_src->asid = flow.src_asid;
+                cp_src->pc = flow.src_pc;
+                cp_dest->asid = flow.dest_asid;
+                cp_dest->pc = flow.dest_pc;
+                tf->src = cp_src;
+                tf->dest = cp_dest;
+                tf->has_count = tf->has_min_instr = tf->has_max_instr = true;
+                tf->count = fs.count;
+                tf->min_instr = fs.min_instr;
+                tf->max_instr = fs.max_instr;
+                Panda__LogEntry ple = PANDA__LOG_ENTRY__INIT;
+                ple.taint_flow = tf;
+                pandalog_write_entry(&ple);
+            }
+            else {
+                cout << TSM_PRE 
+                     << " flow src(asid=" << hex << cp_src->asid << ",pc=" << hex << cp_src->pc << ")"
+                     << " -> dest(asid=" << hex << cp_dest->asid << ",pc=" << hex << cp_dest->pc << ")\n";
+            }
         }
     }
 }

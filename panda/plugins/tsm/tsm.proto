@@ -7,9 +7,9 @@ message CodePoint {
 message TaintFlow {
     required CodePoint src = 1;
     required CodePoint dest = 2;
-    required uint64 count = 3;
-    required uint64 min_instr = 4;
-    required uint64 max_instr = 5;
+    optional uint64 count = 3;
+    optional uint64 min_instr = 4;
+    optional uint64 max_instr = 5;
 }
 
 
