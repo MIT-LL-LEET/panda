@@ -13,6 +13,9 @@
 */
 
 #include <fstream>
+
+#define PLOG_READER 1
+
 #include "panda/plog-cc.hpp"
 
 /* plog-cc.cpp dependencies.

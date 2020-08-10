@@ -58,6 +58,11 @@
 #include "exec/gdbstub.h"
 #include "sysemu/cpus.h"
 
+// from cpu_exec.c
+// used to get right instr count in pandalog for entries
+// written *after* replay finished.
+extern uint64_t panda_num_instr_bb;
+
 /******************************************************************************************/
 /* GLOBALS */
 /******************************************************************************************/
@@ -1651,6 +1656,14 @@ void rr_do_end_replay(int is_error)
     // close logs
     rr_destroy_log();
     // turn off replay
+
+    // after this, we are *not* in replay anymore,
+    // we set this global to last instr count in the replay here
+    // so that pandalog written in uninit_plugin will use that value
+    // rather than the one from the computed in cpu_exec()
+    // which would be close but not the same!
+    panda_num_instr_bb = rr_get_guest_instr_count();
+
     rr_control.mode = RR_OFF;
 
     rr_replay_complete = true;

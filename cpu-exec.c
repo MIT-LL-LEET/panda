@@ -70,6 +70,9 @@ typedef struct SyncClocks {
 // running more than once
 bool panda_bb_invalidate_done = false;
 
+// used to keep track of number of instr (at the basic block level) executed
+uint64_t panda_num_instr_bb = 0;
+
 // Whether or not a block has actually run since cpu_exec was last entered
 bool ranBlockSinceEnter = false;
 
@@ -211,6 +214,8 @@ static inline tcg_target_ulong cpu_tb_exec(CPUState *cpu, TranslationBlock *itb)
 #else
     ret = tcg_qemu_tb_exec(env, tb_ptr);
 #endif // CONFIG_LLVM
+
+    panda_num_instr_bb += itb->icount;
 
     cpu->can_do_io = 1;
     last_tb = (TranslationBlock *)(ret & ~TB_EXIT_MASK);

@@ -6,10 +6,16 @@
 #include <memory>
 #include "panda/plog-cc.hpp"
 #include "panda/plog-cc-bridge.h"
+#include "panda/rr/rr_log.h"
+
 
 using namespace std; 
 
 extern int panda_in_main_loop;
+
+// this is in cpu-exec.c, updated after each
+// bb is executed (so not at each instr).
+extern uint64_t panda_num_instr_bb;
 
 void PandaLog::create(uint32_t chunk_size) {
     this->chunk.size = chunk_size;
@@ -251,6 +257,21 @@ int PandaLog::close(){
     return 0;
 }
 
+
+// need a number for both replay and live
+uint64_t guest_instr_count() {
+#ifdef PLOG_READER
+    return 0;
+#else
+    if (rr_in_replay()) {
+        return rr_get_guest_instr_count();        
+    }
+    return panda_num_instr_bb;
+#endif
+}
+
+
+
 // compress current chunk and write it to file,
 // also update directory map
 void PandaLog::write_current_chunk(){
@@ -293,7 +314,7 @@ void PandaLog::write_current_chunk(){
     //assert(this->)
     add_dir_entry();
     // reset start instr / pos
-    this->chunk.start_instr = rr_get_guest_instr_count();
+    this->chunk.start_instr = guest_instr_count();
     this->chunk.start_pos = this->file->tellg();
     // rewind chunk buf and inc chunk #
     this->chunk.buf_p = this->chunk.buf;
@@ -308,7 +329,7 @@ void PandaLog::write_entry(std::unique_ptr<panda::LogEntry> entry){
 #ifndef PLOG_READER 
     if (panda_in_main_loop) {
         entry->set_pc(panda_current_pc(first_cpu));
-        entry->set_instr(rr_get_guest_instr_count());
+        entry->set_instr(guest_instr_count());
     }
     else {
         entry->set_pc(-1);
