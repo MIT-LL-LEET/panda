@@ -153,6 +153,7 @@ uint64_t b_counter = 0;
 
 typedef std::string Name;
 typedef uint32_t Pid;
+typedef uint32_t Tid;
 typedef uint64_t Asid;
 typedef uint32_t Cell;
 typedef uint64_t Count;
@@ -218,7 +219,7 @@ map<Process, Pid> process_ppid;
 typedef std::pair<Process, ProcessData> ProcessKV;
 
 // process ranges, as observed in time order
-vector<tuple<Process,uint64_t,uint64_t>> proc_ranges;
+vector<tuple<Process,Tid,Instr,Instr>> proc_ranges;
 
 
 
@@ -263,15 +264,16 @@ static unsigned digits(uint64_t num) {
 */
 void saw_proc(std::map<Process, ProcessData> &process_datas, 
               std::map<std::string, unsigned> &name_count,
-              Process process, uint64_t instr_count) {
+              Process process, Tid tid, Instr instr_count) {
 
     ProcessData &pd = process_datas[process];
     if (pd.first == 0) {
         // first encounter of this name/pid -- create reasonable shortname
         pd.first = instr_count;
-        string prnames = "";
+        string prnames = "[";
         for (auto name : process_names[process]) 
             prnames += name + " ";
+        prnames += " / " + (to_string(tid)) + "]";
         unsigned count = ++name_count[prnames];
         std::string count_str(std::to_string(count));
         std::string shortname(prnames);
@@ -311,11 +313,11 @@ void process_all_proc_ranges(std::map<Process, ProcessData> &process_datas,
     uint64_t step = floor(1.0 / scale) / 2;
 
     for (auto ptup : proc_ranges) {
-        auto [ process, i1, i2 ] = ptup;
-        saw_proc(process_datas, name_count, process, i1);
-        saw_proc(process_datas, name_count, process, i2);
+        auto [ process, tid, i1, i2 ] = ptup;
+        saw_proc(process_datas, name_count, process, tid, i1);
+        saw_proc(process_datas, name_count, process, tid, i2);
         for (uint64_t i=i1; i<=i2; i+=step/3) 
-            saw_proc(process_datas, name_count, process, i);
+            saw_proc(process_datas, name_count, process, tid, i);
     }
 }
 
@@ -344,7 +346,7 @@ void spit_asidstory() {
     head << 
         setw(digits(max_instr)) << "Count" <<
         setw(6) << "Pid" << "  " <<
-        setw(NAMELEN) << "Name" << "  " <<
+        setw(NAMELEN) << "Name/tid" << "  " <<
         setw(sizeof(target_ulong) * 2) << "Asid" <<
         "  " << setw(digits(max_instr)) << "First" << 
         "      " << setw(digits(max_instr)) << "Last" << endl;
@@ -501,7 +503,7 @@ void save_proc_range(uint64_t instr_end) {
         cout << "]\n";
     }
 
-    auto ptup = make_tuple(process, instr_first_good_proc, instr_end);
+    auto ptup = make_tuple(process, first_good_proc_tid, instr_first_good_proc, instr_end);
     proc_ranges.push_back(ptup);
 
     if (pandalog && !summary_mode) {
