@@ -52,38 +52,49 @@ typedef uint32_t Taintabel;
 
 struct Thread {
     target_ptr_t pid;
+    target_ptr_t ppid;
     target_ptr_t tid;
     uint64_t create_time;
 
+/*
     bool operator ==(const Thread &other) const {
-        if ((this->pid == other.pid) && (this->tid == other.tid) 
+        if ((this->pid == other.pid) 
+            && (this->ppid == other.ppid)
+            && (this->tid == other.tid) 
             && (this->create_time == other.create_time))
             return true;
         return false;
     }
+*/
 
     bool operator <(const Thread &other) const {
-        if (this->pid < other.pid) return true;
+        if (this->pid < other.pid) return true;        
         if (this->pid > other.pid) return false;
+        if (this->ppid < other.ppid) return true;
+        if (this->ppid > other.ppid) return false;
         if (this->tid < other.tid) return true;
         if (this->tid > other.tid) return false;
         if (this->create_time < other.create_time) return true;
         return false;
     }
 
+/*
     bool operator >(const Thread &other) const {
-        if (this->pid < other.pid) return false;
-        if (this->pid > other.pid) return true;
-        if (this->tid < other.tid) return false;
-        if (this->tid > other.tid) return true;
-        if (this->create_time < other.create_time) return false;
+        
+        if (this->pid < other.pid) return true;
+        if (this->pid > other.pid) return false;
+        if (this->ppid < other.ppid) return true;
+        if (this->ppid > other.ppid) return false;
+        if (this->tid < other.tid) return true;
+        if (this->tid > other.tid) return false;
+        if (this->create_time < other.create_time) return ;
         return true;
     }
-
+*/
 
     friend std::ostream &operator<<(std::ostream &os, const Thread &th) {
-        os << "(Thread," << "pid=" << th.pid << ",tid=" << th.tid 
-           << "create_time=" << th.create_time << ")";
+        os << "(Thread," << "pid=" << th.pid << ",ppid=" << th.ppid 
+           << ",tid=" << th.tid << "create_time=" << th.create_time << ")";
         return os;
     }
 };
@@ -98,7 +109,7 @@ struct WriteInfo {
 
     bool operator <(const WriteInfo &other) const {
         if (this->thread < other.thread) return true;
-        if (this->thread > other.thread) return false;
+        if (other.thread < this->thread) return false;
         if (this->pc < other.pc) return true;
         if (this->pc > other.pc) return false;
         if (this->instr < other.instr) return true;
@@ -130,9 +141,9 @@ struct WriteReadFlow {
 
     bool operator <(const WriteReadFlow &other) const {
         if (this->src_thread < other.src_thread) return true;
-        if (this->src_thread > other.src_thread) return false;
+        if (other.src_thread < this->src_thread) return false;
         if (this->dest_thread < other.dest_thread) return true;
-        if (this->dest_thread > other.dest_thread) return false;
+        if (other.dest_thread < this->dest_thread) return false;
         if (this->src_pc < other.src_pc) return true;
         if (this->src_pc > other.src_pc) return false;
         if (this->dest_pc < other.dest_pc) return true;
@@ -161,7 +172,7 @@ struct WriteReadFlowStats {
 
 // taint labels map to WriteInfo structs
 map<WriteInfo, TaintLabel> wi2l;
-map<uint32_t, WriteInfo> l2wi;
+map<TaintLabel, WriteInfo> l2wi;
 
 // true if we are tracking flows into / out of kernel code points
 bool track_kernel = false;
@@ -208,7 +219,7 @@ void after_store(CPUState *cpu, uint64_t addr, uint64_t data, size_t size, bool 
     target_ulong pc = cpu->panda_guest_pc;
 
     if (debug) 
-        cout << TSM_PRE << " after_store: Write @ pc=" << hex << pc << " addr=" << addr << " size=" << "size \n";
+        cout << TSM_PRE << " after_store: Write @ pc=" << hex << pc << " addr=" << addr << " size=" << size << "\n";
     
     // obtain data just stored
     int size32max = (size < 32) ? size : 32;
@@ -245,13 +256,15 @@ void after_store(CPUState *cpu, uint64_t addr, uint64_t data, size_t size, bool 
     else {
         Thread thread;
         thread.pid = current->pid;
+        thread.ppid = current->ppid;
         thread.tid = othread->tid;
         thread.create_time = current->create_time;
         WriteInfo wi;
         wi.thread = thread;
         wi.pc = pc;
         wi.in_kernel = panda_in_kernel(cpu);
-        
+        wi.instr = rr_get_guest_instr_count();
+
         TaintLabel l;
         if (wi2l.count(wi) == 0) {
             // l is a new label -- this is first time we've seen this WriteInfo
@@ -264,6 +277,7 @@ void after_store(CPUState *cpu, uint64_t addr, uint64_t data, size_t size, bool 
         else  {
             // old label
             l = wi2l[wi];
+//            cout << " Using old label l=" << l << "\n";
         }
         
         // NB: yes, we just discard / overwrite any existing taint labels on this memory extent
@@ -380,11 +394,13 @@ void before_load(CPUState *cpu, uint64_t addr, uint64_t data, size_t size, bool 
         
         Thread read_thread;
         read_thread.pid = current->pid;
+        read_thread.ppid = current->ppid;
         read_thread.tid = othread->tid;
         read_thread.create_time = current->create_time;
         
         // every label observed on this read indicates a flow from a prior labeled write
         for (auto l : all_labels) {
+//            cout << "l = " << l << "\n";
             // there is a flow from write that is label l to this read
             WriteInfo wi = l2wi[l];
             uint64_t read_instr = rr_get_guest_instr_count();
@@ -403,12 +419,15 @@ void before_load(CPUState *cpu, uint64_t addr, uint64_t data, size_t size, bool 
             }
             else {
                 if (pandalog) {
+//                    cout << "Pandalogging flow\n";
                     Panda__Thread th_src, th_dest;
                     th_src = th_dest = PANDA__THREAD__INIT;
                     th_src.pid = wi.thread.pid;
+                    th_src.ppid = wi.thread.ppid;
                     th_src.tid = wi.thread.tid;
                     th_src.create_time = wi.thread.create_time;
                     th_dest.pid = read_thread.pid;
+                    th_dest.ppid = read_thread.ppid;
                     th_dest.tid = read_thread.tid;
                     th_dest.create_time = read_thread.create_time;
                     Panda__CodePoint cp_src, cp_dest;
@@ -425,11 +444,13 @@ void before_load(CPUState *cpu, uint64_t addr, uint64_t data, size_t size, bool 
                     tf.dest = &cp_dest;
                     Panda__LogEntry ple = PANDA__LOG_ENTRY__INIT;
                     ple.write_read_flow = &tf;
+                    ple.has_asid = true;
+                    ple.asid = current->asid;
                     pandalog_write_entry(&ple);                
                 }
             }
                 // not unique flows 
-                num_flows ++;
+            num_flows ++;
         }
             
         double replay_percent = rr_get_percentage();
