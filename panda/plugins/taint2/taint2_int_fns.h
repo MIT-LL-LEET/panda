@@ -73,7 +73,12 @@ uint32_t taint2_query_tcn_io(uint64_t ia);
 
 // Returns a mask indicating which bits are attacker-controlled (derived
 // reversibly from input).
+// note: this is really for a range of bytes (size)
+// and all packed into a uint64_t.  So size < 8.
 uint64_t taint2_query_cb_mask(Addr a, uint8_t size);
+
+// just return cb mask for this ram offset
+uint8_t taint2_query_cb_mask_ram(uint64_t RamOffset);
 
 // delete taint from this RAM Offset
 void taint2_delete_ram(uint64_t RamOffset);

@@ -55,6 +55,7 @@ uint32_t taint2_query_tcn_io(uint64_t ia);
 uint32_t taint2_query_tcn_llvm(int reg_num, int offset);
 
 uint64_t taint2_query_cb_mask(Addr a, uint8_t size);
+uint8_t taint2_query_cb_mask_ram(uint64_t RamOffset);
 
 void taint2_labelset_addr_iter(Addr addr, int (*app)(uint32_t el, void *stuff1), void *stuff2);
 void taint2_labelset_ram_iter(uint64_t RamOffset, int (*app)(uint32_t el, void *stuff1), void *stuff2);

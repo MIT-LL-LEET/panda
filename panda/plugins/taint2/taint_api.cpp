@@ -392,6 +392,11 @@ uint64_t taint2_query_cb_mask(Addr a, uint8_t size) {
     return cb_mask;
 }
 
+uint8_t taint2_query_cb_mask_ram(uint64_t RamOffset) {
+    Addr a = make_maddr(RamOffset);
+    return tp_query_full(a).cb_mask;
+}
+
 uint32_t taint2_num_labels_applied(void) {
     return labels_applied.size();
 }
