@@ -32,6 +32,9 @@ uint64_t get_libs_count = 0;
 uint64_t get_libs_failed_count = 0;
 
 void get_libs(CPUState *env) {
+
+  //  cout << "instr = " << rr_get_guest_instr_count() << "\n";   
+
     get_libs_count ++;
 
     bool fail = false;
@@ -61,7 +64,8 @@ void get_libs(CPUState *env) {
     else {
         ll->succeeded = true;
 /*
-        cout << "get_libs works! panda_in_kernel=" << panda_in_kernel(env) 
+        cout << "instr= " << rr_get_guest_instr_count() << " get_libs works! panda_in_kernel=" << panda_in_kernel(env) 
+            << " |mappings| = " << (ms->len)
              << " pid=" << current->pid << " create_time=" << current->create_time 
              << " tid=" << thread->tid << " proc_name=" << current-> name << "\n";
 */
@@ -117,13 +121,13 @@ void mmap_return(CPUState *cpu, target_ulong pc, unsigned long addr, unsigned lo
 uint64_t bb_count = 0;
 
 void before_block(CPUState *env, TranslationBlock *tb) {
-/*
+
     // check up on module list every 50 bb
     bb_count ++;
     if ((bb_count % 2) == 0) {
         get_libs(env);
     }
-*/
+
 }
 
 
@@ -134,11 +138,10 @@ bool init_plugin(void *self) {
     
     PPP_REG_CB("syscalls2", on_sys_mmap_return, mmap_return);
 
-
     panda_cb pcb;    
     pcb.before_block_exec = before_block;
     panda_register_callback(self, PANDA_CB_BEFORE_BLOCK_EXEC, pcb);
-    
+  
     return true;
 }
 
