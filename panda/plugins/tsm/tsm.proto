@@ -1,5 +1,3 @@
-
-
 message Thread {
     required uint32 pid = 1;
     required uint32 ppid = 2;
@@ -10,14 +8,44 @@ message Thread {
 message CodePoint {
     required Thread thread = 1; 
     required uint64 pc = 2;
-    required uint64 instr = 3;  // when the read or write happened
+    required uint64 instr = 3;         // when the read or write happened
 }
 
-message WriteReadFlow {
-    required CodePoint src = 1;
-    required CodePoint dest = 2;
-    optional uint64 count = 3;
+message FlowSource {
+    required CodePoint cp = 1;
+    required uint32 size = 2;          // size or load or store
+    required uint64 value = 3;         // the actual value at the load or store
+    required bool is_store = 4;        // indicates load/store
+}    
+
+message FlowSink {
+    required CodePoint cp = 1; 
+    required uint32 size = 2;          // size or load or store
+    required uint64 value = 3;         // the actual value at the load or store
+    required bool is_store = 4;        // indicates load/store
+}    
+
+// copy for load -> store 
+// or       store -> load
+message FlowCopy {    
+    required FlowSource source = 1;
+    required FlowSink sink = 2;
+    optional uint64 count = 4;         // in summary mode we count
+}
+
+// this is only load -> store
+// plus the computation that happened
+// this one has offset since we need to record each flow to
+// a byte in sink since they may all be different
+message FlowCompute {
+    required FlowSource source = 1;
+    required FlowSink sink = 2;
+    required uint32 offset = 3;      
+    required uint32 card = 4;
+    required uint32 tcn = 5;
+    required uint32 cb = 6;            // # reversible bits
 }
 
 
-optional WriteReadFlow write_read_flow = 57;
+optional FlowCopy flow_copy = 57;
+optional FlowCompute flow_compute = 58;
