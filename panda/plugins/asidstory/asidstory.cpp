@@ -736,8 +736,6 @@ bool init_plugin(void *self) {
     #else
         panda_require("syscalls2");
         assert(init_syscalls2_api());
-        PPP_REG_CB("syscalls2", on_sys_execve_enter, execve_cb);
-        PPP_REG_CB("syscalls2", on_sys_execveat_enter, execveat_cb);
     #endif
 
     panda_arg_list *args = panda_get_args("asidstory");
