@@ -39,6 +39,7 @@ void get_libs(CPUState *env) {
 
     bool fail = false;
     OsiProc *current =  get_current_process(env); 
+
     if (current == NULL) fail=true;
     if (current->pid == 0) fail=true;
     Asid asid = panda_current_asid(env); 
