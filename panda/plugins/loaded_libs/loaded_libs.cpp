@@ -26,22 +26,24 @@ using namespace std;
 
 typedef target_ulong Asid;
 
+void cleanup_osi(OsiProc *current, OsiThread *thread, GArray *ms) {
+    if (current) free_osiproc(current);
+    if (thread) free_osithread(thread);
+    if (ms) cleanup_garray(ms);
+}
 
 
 uint64_t get_libs_count = 0;
 uint64_t get_libs_failed_count = 0;
 
 void get_libs(CPUState *env) {
-
-  //  cout << "instr = " << rr_get_guest_instr_count() << "\n";   
-
+    
     get_libs_count ++;
 
     bool fail = false;
     OsiProc *current =  get_current_process(env); 
     if (current == NULL) fail=true;
     if (current->pid == 0) fail=true;
-    Asid asid = panda_current_asid(env); 
     GArray *ms = get_mappings(env, current); 
     if (ms == NULL) fail=true;
     OsiThread *thread = get_current_thread(env);
@@ -49,26 +51,13 @@ void get_libs(CPUState *env) {
 
     assert (pandalog);
 
-    Panda__LogEntry ple = PANDA__LOG_ENTRY__INIT; 
-
-    Panda__LoadedLibs *ll = (Panda__LoadedLibs *) malloc (sizeof (Panda__LoadedLibs)); 
-    *ll = PANDA__LOADED_LIBS__INIT; 
-
     if (fail) {
-        ll->succeeded = false;
-//        cout << "get_libs fails\n";
-        ple.asid_libraries = ll;
-        pandalog_write_entry(&ple);         
         get_libs_failed_count ++;
     }
     else {
-        ll->succeeded = true;
-/*
-        cout << "instr= " << rr_get_guest_instr_count() << " get_libs works! panda_in_kernel=" << panda_in_kernel(env) 
-            << " |mappings| = " << (ms->len)
-             << " pid=" << current->pid << " create_time=" << current->create_time 
-             << " tid=" << thread->tid << " proc_name=" << current-> name << "\n";
-*/
+
+        Panda__LogEntry ple = PANDA__LOG_ENTRY__INIT; 
+        Panda__LoadedLibs ll = PANDA__LOADED_LIBS__INIT;
         Panda__Module** m = (Panda__Module **) malloc (sizeof (Panda__Module *) * ms->len);  
         for (int i = 0; i < ms->len; i++) { 
             OsiModule *module = &g_array_index(ms, OsiModule, i); 
@@ -82,21 +71,23 @@ void get_libs(CPUState *env) {
             m[i]->base_addr = module->base; 
             m[i]->size = module->size; 
         }
-        ll->modules = m;  
-        ll->n_modules = ms->len;
-        ll->has_pid = true;
-        ll->has_ppid = true;
-        ll->has_create_time = true;
-        ll->has_tid = true;
-        ll->proc_name = strdup(current->name);
-        ll->pid = current->pid;
-        ll->ppid = current->ppid; 
-        ll->create_time = current->create_time;
-        ll->tid = thread->tid;
+        ll.modules = m;  
+        ll.n_modules = ms->len;
+        ll.has_pid = true;
+        ll.has_ppid = true;
+        ll.has_create_time = true;
+        ll.has_tid = true;
+        ll.proc_name = strdup(current->name);
+        ll.pid = current->pid;
+        ll.ppid = current->ppid; 
+        ll.create_time = current->create_time;
+        ll.tid = thread->tid;
+
+        Asid asid = panda_current_asid(env); 
     
         ple.has_asid = true;
         ple.asid = asid;    
-        ple.asid_libraries = ll;
+        ple.asid_libraries = &ll;
         pandalog_write_entry(&ple);         
         
         for (int i=0; i<ms->len; i++) {
@@ -106,7 +97,7 @@ void get_libs(CPUState *env) {
         free(m);
     }
 
-    free(ll);
+    cleanup_osi(current, thread, ms);
 }
 
 
@@ -124,7 +115,7 @@ void before_block(CPUState *env, TranslationBlock *tb) {
 
     // check up on module list every 50 bb
     bb_count ++;
-    if ((bb_count % 2) == 0) {
+    if ((bb_count % 100) == 0) {
         get_libs(env);
     }
 

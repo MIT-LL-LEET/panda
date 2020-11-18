@@ -67,24 +67,7 @@ Panda__SrcInfoPri *pandalog_src_info_pri_create(const char *src_filename, uint64
     si->insertionpoint = 1;
     return si;
 }
-// should just be able to include these from taint2.h or taint_processor.cpp
-Addr make_maddr(uint64_t a) {
-  Addr ma;
-  ma.typ = MADDR;
-  ma.val.ma = a;
-  ma.off = 0;
-  ma.flag = (AddrFlag) 0;
-  return ma;
-}
-Addr make_greg(uint64_t r, uint16_t off) {
-    Addr ra = {
-        .typ = GREG,
-        .val = { .gr = r },
-        .off = off,
-        .flag = (AddrFlag) 0
-    };
-    return ra;
-}
+
 void print_membytes(CPUState *env, target_ulong a, target_ulong len) {
     unsigned char c;
     printf("{ ");
