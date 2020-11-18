@@ -8,44 +8,52 @@ message Thread {
 message CodePoint {
     required Thread thread = 1; 
     required uint64 pc = 2;
-    required uint64 instr = 3;         // when the read or write happened
 }
 
-message FlowSource {
+message TaintSource {
     required CodePoint cp = 1;
     required uint32 size = 2;          // size or load or store
     required uint64 value = 3;         // the actual value at the load or store
-    required bool is_store = 4;        // indicates load/store
+    required uint64 instr = 4;        
+    required bool is_store = 5;        // indicates load/store
+    optional uint32 label = 6;
 }    
 
-message FlowSink {
+message TaintSink {
     required CodePoint cp = 1; 
     required uint32 size = 2;          // size or load or store
-    required uint64 value = 3;         // the actual value at the load or store
-    required bool is_store = 4;        // indicates load/store
+    required uint64 value = 3;         // the actual value at the load or store 
+    required uint64 instr = 4;        
+    required bool is_store = 5;        // indicates load/store
 }    
 
-// copy for load -> store 
-// or       store -> load
-message FlowCopy {    
-    required FlowSource source = 1;
-    required FlowSink sink = 2;
-    optional uint64 count = 4;         // in summary mode we count
-}
 
 // this is only load -> store
 // plus the computation that happened
 // this one has offset since we need to record each flow to
 // a byte in sink since they may all be different
-message FlowCompute {
-    required FlowSource source = 1;
-    required FlowSink sink = 2;
-    required uint32 offset = 3;      
-    required uint32 card = 4;
-    required uint32 tcn = 5;
-    required uint32 cb = 6;            // # reversible bits
+message TaintFlow {
+    required TaintSource source = 1;     // source of the flow
+    required TaintSink sink = 2;         // sink of the flow
+    required bool copy = 3;             // true iff this is a copy flow
+    // these are only for 
+    // compute flows (non-copy)
+    optional uint32 offset = 4;        
+    optional uint32 card = 5;
+    optional uint32 tcn = 6;
+    optional uint32 cb = 7;             // # reversible bits
 }
 
 
-optional FlowCopy flow_copy = 57;
-optional FlowCompute flow_compute = 58;
+
+message TsmChange {
+    required CodePoint cp = 1;           // code that did the write
+    required uint64 vaddr = 2;           // addr / size of the write
+    required uint32 size = 3;
+}
+
+optional TaintSource taint_source = 59;
+
+optional TaintFlow taint_flow = 57;
+
+optional TsmChange tsm_change = 58;

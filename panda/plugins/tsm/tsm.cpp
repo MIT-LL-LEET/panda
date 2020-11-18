@@ -9,12 +9,13 @@ extern "C" {
 
 #include "panda/plugin.h"
 #include "taint2/taint2.h"
+#include "taint2/addr_fns.h"
 
 extern "C" {
 #include "taint2/taint2_ext.h"
+#include "taint2/taint2_int_fns.h"
 #include "osi/osi_types.h"
 #include "osi/osi_ext.h"
-
 }
 
 #include <iostream>
@@ -23,6 +24,7 @@ extern "C" {
 #include <map>
 #include <set>
 #include <stack>
+
 
 #include <bits/stdc++.h>
 
@@ -48,6 +50,32 @@ using namespace std;
 extern ram_addr_t ram_size;
 
 typedef uint32_t Taintabel;
+
+#define EBX ((CPUArchState*)cpu->env_ptr)->regs[R_EBX]
+
+uint32_t max_tcn;
+
+string addr_typ_name[11] = { 
+    "haddr", "maddr", "iaddr", "paddr", "laddr", "greg", 
+    "gspec", "unk", "const", "ret", "addr_last"};
+
+string addr_str(Addr a) {
+    string val;
+    switch (a.typ) {
+    case MADDR:
+        val = to_string(a.val.ma);
+        break;
+    case LADDR:
+        val = to_string(a.val.la);
+        break;
+    case GREG:
+        val = to_string(a.val.gr);
+        break;
+    default:
+        assert (1==0);
+    }
+    return (string(addr_typ_name[a.typ])) + "(" + val + ")";
+}
 
 
 struct Thread {
@@ -142,15 +170,19 @@ struct SourceSink {
     
 };
 
+    
+
+
+
 
 // A flow, either from store to load 
 // or from load (through computation) to store
-struct Flow {
+struct TaintFlow {
     bool sinkIsStore;         // if true then load->store, else store->load
     SourceSink source;
     SourceSink sink;
 
-    bool operator <(const Flow &other) const {
+    bool operator <(const TaintFlow &other) const {
         if (this->sinkIsStore < other.sinkIsStore) return true;
         if (this->sinkIsStore > other.sinkIsStore) return false;
         if (this->source < other.source) return true;
@@ -159,8 +191,8 @@ struct Flow {
         return false;
     }
 
-    friend std::ostream &operator<<(std::ostream &os, const Flow &flow) {
-        os << "(Flow,sinkIsStore=" << flow.sinkIsStore 
+    friend std::ostream &operator<<(std::ostream &os, const TaintFlow &flow) {
+        os << "(TaintFlow,sinkIsStore=" << flow.sinkIsStore 
            <<  ",From=" << flow.source << ",To=" << flow.sink << ")";
         return os;
     }
@@ -180,13 +212,25 @@ TaintLabel next_label=1;
 // true if we are tracking flows into / out of kernel code points
 bool track_kernel = false;
 
-bool summary = false;
+// true if we are logging TSM updates on store/load
+bool log_map_updates = false;
+
+// log load -> compute -> store flows?
+bool log_compute_flows = false;
+
+// flow logging mode
+// FlowsNone:   no flows (default)
+// FlowsStore:  only store->load flows
+// FlowsBoth:   store->load and load->store flows
+#define FLOWS_STORE_LOAD 1
+#define FLOWS_LOAD_STORE 2
+uint8 log_flows_mode = 0;
 
 // really just indicating if anything has a taint label yet
 uint64_t first_taint_instr = 0;
 
 // collect & count flows between source and sink code points
-map<Flow, uint64_t> flows;
+map<TaintFlow, uint64_t> flows;
 
 // used to spit out diag msg every 1% of replay
 double next_replay_percent = 0.0;
@@ -206,6 +250,41 @@ void enable_taint(CPUState *cpu, target_ptr_t pc) {
 }
 
 
+// vaddr is a virtual addr
+// determine if it is mapped.
+// return a pair (bool, Addr)
+// first is true iff all bytes are mapped
+// second is taint system Addr for vaddr (or for 0 if not mapped)
+pair<bool, Addr> get_maddr(CPUState *cpu, bool isStore, uint64_t vaddr) {
+    ram_addr_t ra;
+    MemTxResult mtr = PandaVirtualAddressToRamOffset(&ra, cpu, vaddr, isStore);
+    if (mtr != MEMTX_OK) 
+        return make_pair(false, create_maddr((uint64_t) 0));
+    return make_pair(true, create_maddr((uint64_t) (ra)));
+}            
+
+
+Addr get_addr_with_offset(Addr a, uint32_t i) {
+    Addr b = a;
+    switch (a.typ) {
+    case MADDR:
+        // this should be true, right?
+        assert (a.off == 0);
+        b.val.ma += i;
+        break;
+    case LADDR:
+    case GREG:
+        b.off = i;
+        break;
+    default:
+        cout << "Encountered addr type [" << (addr_typ_name[a.typ]) << "] ?\n";
+        assert (1==0);
+        break;
+    }
+    return b;
+}
+
+
 
 // used to collect labels in a set
 set<TaintLabel> all_labels;
@@ -221,32 +300,30 @@ LabelType collect_labels_type;
 // taint2_labelset_ram_iter  helper
 int collect_labels(TaintLabel l, void *stuff) {
     // only collect one kind of label 
-    if (label2source[l].isStore
-        && collect_labels_type == StoreLabel)
+    if ((label2source[l].isStore && collect_labels_type == StoreLabel) 
+        || (!label2source[l].isStore && collect_labels_type == LoadLabel))
         all_labels.insert(l);
     return 0;
 }
 
 
-// is_store = true if we call from after_store
-// in which case we should be collecting load labeles
-// false means a load thus we collect store labels
-// note: labels end up in global all_labels
-uint32_t get_ldst_labels(bool is_store, CPUState *cpu, LabelType label_type, uint64_t addr, size_t size) {
+// consider each of the bytes in (addr,size)
+// count how many have taint
+// also collect all labels seen on any byte in a big set: all_labels
+uint32_t get_ldst_labels(CPUState *cpu, LabelType label_type, 
+                         Addr addr, size_t size) {
     all_labels.clear();
     // collect load labels for a store and store labels for a load
     collect_labels_type = label_type;
-    // how many of size bytes about to be load are tainted?
+    // how many bytes on the range are tainted?
     uint32_t num_tainted = 0;
+    assert (addr.off == 0);
     for (int i=0; i<size; i++) {
-        ram_addr_t ra;
-        MemTxResult mtr = PandaVirtualAddressToRamOffset(&ra, cpu, addr+i, is_store);
-        if (mtr != MEMTX_OK) 
-            continue;                                           
-        if (taint2_query_ram(ra)) {
-            taint2_labelset_ram_iter(ra, collect_labels, NULL);
-            num_tainted ++;
-        }
+        Addr b = get_addr_with_offset(addr, i);
+        if (taint2_query(b)) {
+            taint2_labelset_iter(b, collect_labels, NULL);
+            num_tainted++;
+        }        
     }
     return num_tainted;
 }
@@ -260,11 +337,13 @@ void spit_thread(OsiProc *process, OsiThread *thread) {
 
 
 
-Panda__FlowSource make_psource(SourceInfo &source, Panda__CodePoint &psource_cp, Panda__Thread &psource_thread) {
-    Panda__FlowSource psource;
+
+void make_psource(SourceInfo &source, Panda__CodePoint &psource_cp,
+                  Panda__TaintSource &psource, Panda__Thread &psource_thread) {
 
     psource_thread = PANDA__THREAD__INIT;
     psource_thread.pid = source.thread.pid;
+
     psource_thread.ppid = source.thread.ppid;
     psource_thread.tid = source.thread.tid;
     psource_thread.create_time = source.thread.create_time;
@@ -272,66 +351,73 @@ Panda__FlowSource make_psource(SourceInfo &source, Panda__CodePoint &psource_cp,
     psource_cp = PANDA__CODE_POINT__INIT;
     psource_cp.thread = &psource_thread;
     psource_cp.pc = source.pc;
-    psource_cp.instr = source.instr;
     
-    psource = PANDA__FLOW_SOURCE__INIT;
+    psource = PANDA__TAINT_SOURCE__INIT;
     psource.cp = &psource_cp;
     psource.size = source.size;
     psource.value = source.value;
+    psource.instr = source.instr;
     psource.is_store = source.isStore;
 
-    return psource;
 }
 
 
-Panda__FlowSink make_psink(bool sinkIsStore, OsiProc *process, OsiThread *thread, target_ptr_t pc, uint64_t instr, 
-                          uint64_t data, size_t size, Panda__CodePoint &psink_cp, Panda__Thread &psink_thread) {
-    Panda__FlowSink psink;
+void fill_pthread(OsiProc *process, OsiThread *thread, Panda__Thread &pthread) {
+    pthread = PANDA__THREAD__INIT;
+    pthread.pid = process->pid;
+    pthread.ppid = process->ppid;
+    pthread.tid = thread->tid;
+    pthread.create_time = process->create_time;
+}
 
-    psink_thread = PANDA__THREAD__INIT;
-    psink_thread.pid = process->pid;
-    psink_thread.ppid = process->ppid;
-    psink_thread.tid = thread->tid;
-    psink_thread.create_time = process->create_time;
+
+
+void make_psink(bool isStore, OsiProc *process, OsiThread *thread, 
+                target_ptr_t pc, uint64_t instr, uint64_t data, 
+                size_t size, Panda__CodePoint &psink_cp,
+                Panda__TaintSink &psink, Panda__Thread &psink_thread) {
+
+    fill_pthread(process, thread, psink_thread);
     
     psink_cp = PANDA__CODE_POINT__INIT;
     psink_cp.thread = &psink_thread;
     psink_cp.pc = pc;
-    psink_cp.instr = instr;
     
-    psink = PANDA__FLOW_SINK__INIT;
+    psink = PANDA__TAINT_SINK__INIT;
     psink.cp = &psink_cp;
     psink.size = size;
     psink.value = data;
-    psink.is_store = sinkIsStore;
+    psink.instr = instr;
+    psink.is_store = isStore;
 
-    return psink;
 }
 
 
 /*
   Log copy flow
+
+  if atStore then src is load and sink is store
+  else src is store and sink is load
+
   pc, addr, size, and data are all for sink
+
+  NOTE: uses all_labels which is assume previously to have been
+  populated by a call to get_ldst_labels
+
 */
-void log_copy_flows(bool sinkIsStore, CPUState *cpu, OsiProc *process, OsiThread *thread, 
-                    target_ptr_t pc, uint64_t addr, size_t size, uint64_t data) {
+void log_copy_flows(bool atStore, CPUState *cpu, OsiProc *process, OsiThread *thread, 
+                    target_ptr_t pc, Addr addr, size_t size, uint64_t data) {
         
-    // get taint labels on sink
-    uint32_t num_tainted = get_ldst_labels(sinkIsStore, cpu, (sinkIsStore ? LoadLabel : StoreLabel), addr, size);
-
-    if (debug) cout << TSM_PRE << " log_flows: num_tainted=" << dec << num_tainted << "\n";
-
-    // no taint on sink so no flows
-    if (num_tainted == 0) return;
-
     uint64_t instr = rr_get_guest_instr_count();
-    
-    // NB: all_labels populated by get_ldst_labels
+
+    // NB: all_labels was populated by get_ldst_labels
+    // in caller
+    assert (all_labels.size() == 1);
     for (auto l : all_labels) {
         SourceInfo source = label2source[l];
         // flow is from load -> store or store -> load
         // if one is store the other should be load, and vice versa
-        assert (source.isStore != sinkIsStore);
+        assert (source.isStore != atStore);
         if (debug) {
             cout << TSM_PRE << " log_copy_flows: flow observed from "
                  << source.thread;
@@ -340,47 +426,36 @@ void log_copy_flows(bool sinkIsStore, CPUState *cpu, OsiProc *process, OsiThread
             cout << " pc=" << hex << pc << dec << "\n";
             cout << "\n";
         }
-        if (summary) {
-/*
-            Thread sink_thread = {process->pid, process->ppid, othread->tid, process->create_time};
-            SourceSink source = {source.thread, source.instr, source.pc};
-            SourceSink sink = {sink_thread, sink_instr, sink_pc};
-            Flow flow = {isStore, source, sink};
-            if (flows.count(flow) == 0) 
-                flows[flow] = 0;            
-            flows[flow] += 1;
-*/
-        }
-        else {
-            if (pandalog) {
-                Panda__LogEntry ple;
-                Panda__CodePoint psource_cp, psink_cp;
-                Panda__Thread psource_thread, psink_thread;
-
-                Panda__FlowSource psource = make_psource(source, psource_cp, psource_thread);
-                Panda__FlowSink psink = make_psink(sinkIsStore, process, thread, pc, instr, data, size, psink_cp, psink_thread);
-                    
-                Panda__FlowCopy pflow_copy = PANDA__FLOW_COPY__INIT;
-                pflow_copy.source = &psource;
-                pflow_copy.sink = &psink;
-                
-                ple = PANDA__LOG_ENTRY__INIT;
-                ple.has_asid = true;
-                ple.asid = panda_current_asid(cpu);
-                ple.flow_copy = &pflow_copy;
-                pandalog_write_entry(&ple);
-            }
+        if (pandalog) {
+            Panda__LogEntry ple;
+            Panda__CodePoint psource_cp, psink_cp;
+            Panda__Thread psource_thread, psink_thread;
+            Panda__TaintSource psource; 
+            make_psource(source, psource_cp, psource, psource_thread);
+            Panda__TaintSink psink;
+            make_psink(atStore, process, thread, pc, instr, data, size, psink_cp, 
+                       psink, psink_thread);                    
+            Panda__TaintFlow taint_flow = PANDA__TAINT_FLOW__INIT;
+            taint_flow.source = &psource;
+            taint_flow.sink = &psink;
+            taint_flow.copy = true;              
+            ple = PANDA__LOG_ENTRY__INIT;
+            ple.has_asid = true;
+            ple.asid = panda_current_asid(cpu);
+            ple.taint_flow = &taint_flow;
+            pandalog_write_entry(&ple);            
         }
         // not unique flows 
         num_flows ++;
+        
     }
 }
 
 
     
 
-void log_compute_flow(bool sinkIsStore, CPUState *cpu, SourceInfo &source, OsiProc *process, OsiThread *thread,
-                      target_ptr_t pc, uint64_t addr, size_t size, uint64_t data, uint32_t offset,
+void log_compute_flow(bool atStore, CPUState *cpu, SourceInfo &source, OsiProc *process, OsiThread *thread,
+                      target_ptr_t pc, size_t size, uint64_t data, uint32_t offset,
                       uint32_t card, uint8_t cb, uint32_t tcn) {
 
     if (debug) {
@@ -391,104 +466,123 @@ void log_compute_flow(bool sinkIsStore, CPUState *cpu, SourceInfo &source, OsiPr
         cout << " pc=" << hex << pc << dec << "\n";
         cout << "\n";
     }
-    if (summary) {
-        /* 
-           do something
-        */
-    }
-    else {
-        if (pandalog) {            
-    
-            Panda__LogEntry ple;
-            Panda__CodePoint psource_cp, psink_cp;
-            Panda__Thread psource_thread, psink_thread;
-
-            Panda__FlowSource psource = make_psource(source, psource_cp, psource_thread);
-            Panda__FlowSink psink = make_psink(sinkIsStore, process, thread, pc, rr_get_guest_instr_count(), data, size, psink_cp, psink_thread);
-                    
-            Panda__FlowCompute pflow_compute = PANDA__FLOW_COMPUTE__INIT;
-            pflow_compute.source = &psource;
-            pflow_compute.sink = &psink;
-            pflow_compute.offset = offset;
-            pflow_compute.card = card;
-            pflow_compute.tcn = tcn;
-            pflow_compute.cb = cb;
-    
-            ple = PANDA__LOG_ENTRY__INIT;
-            ple.has_asid = true;
-            ple.asid = panda_current_asid(cpu);
-            ple.flow_compute = &pflow_compute;
-            pandalog_write_entry(&ple);
-        }
+    if (pandalog) {                
+        Panda__LogEntry ple;
+        Panda__CodePoint psource_cp, psink_cp;
+        Panda__Thread psource_thread, psink_thread;
+        Panda__TaintSource psource;
+        Panda__TaintSink psink;
+        make_psource(source, psource_cp, psource, psource_thread);
+        make_psink(atStore, process, thread, pc, rr_get_guest_instr_count(), 
+                   data, size, psink_cp, psink, psink_thread);
+        
+        Panda__TaintFlow taint_flow = PANDA__TAINT_FLOW__INIT;
+        taint_flow.source = &psource;
+        taint_flow.sink = &psink;
+        taint_flow.copy = false;
+        taint_flow.has_offset = taint_flow.has_card = taint_flow.has_tcn = taint_flow.has_cb = true;
+        taint_flow.offset = offset;
+        taint_flow.card = card;
+        taint_flow.tcn = tcn;
+        taint_flow.cb = cb;    
+        ple = PANDA__LOG_ENTRY__INIT;
+        ple.has_asid = true;
+        ple.asid = panda_current_asid(cpu);
+        ple.taint_flow = &taint_flow;
+        pandalog_write_entry(&ple);        
     }
     
 }
 
+// returns true iff all bytes on this extent are a copy wrt original taint labels
+bool its_a_copy(Addr addr, size_t size, uint32_t num_tainted) {
+    bool copy = false;
+    if (num_tainted == size && all_labels.size() == 1) {
+        // all the bytes on the load extent are tainted
+        // and the union of labels on all bytes is a singleton (one label)
+        uint32_t num_copies = 0;
+        for (int i=0; i<size; i++) {
+            Addr b = get_addr_with_offset(addr, i);
+            uint32_t card = taint2_query(b);
+            if (card != 1) return false;
+            uint32_t tcn = taint2_query_tcn(b);
+            if (tcn == 0) num_copies++;
+            else return false;
+        }
+        if (num_copies == size) {
+            // 1. every byte on the extent (addr,size) is tainted
+            // 2. every byte has a label set with card=1 and tcn=0
+            // 3. further, union of all labels for all tainted bytes is a set containing a single label
+            // all of this together means this load -> store flow is really just a copy
+            copy = true;
+        }
+    }
+    return copy;
+}
+
 
 // Note process, thread, pc, addr, size all refer to sink
-void log_flows(bool sinkIsStore, CPUState *cpu, OsiProc *process, OsiThread *thread, target_ptr_t pc, uint64_t addr, size_t size, uint64_t data) { 
-    if (!sinkIsStore) {
+void log_flows(bool atStore, CPUState *cpu, OsiProc *process, OsiThread *thread, 
+               target_ptr_t pc, Addr addr, size_t size, uint64_t data) { 
+    // is dest even tainted?
+    uint32_t num_tainted;
+    if (atStore) 
+        num_tainted = get_ldst_labels(cpu, LoadLabel, addr, size);
+    else
+        num_tainted = get_ldst_labels(cpu, StoreLabel, addr, size);
+
+    if (num_tainted == 0) return;
+
+    if (!atStore) {
         // store -> load flow
-        // Has to be a copy
-        log_copy_flows(sinkIsStore, cpu, process, thread, pc, addr, size, data);
+        // Has to be a copy -- no it doesnt.  
+        assert (addr.typ == LADDR || addr.typ == GREG);
+        if (its_a_copy(addr, size, num_tainted)) 
+            log_copy_flows(atStore, cpu, process, thread, pc, addr, size, data);            
+        else {
+            cout << "not a copy?  num_tainted=" << num_tainted << " num_labels=" << all_labels.size() << " typ=" << addr.typ << " \n";
+            for (int i=0; i<size; i++) {
+                Addr a = get_addr_with_offset(addr, i);
+                uint32_t card = taint2_query(a);
+                uint32_t tcn = taint2_query_tcn(a);
+                cout << "i=" << i << " card=" << card << " tcn=" << tcn << "\n";
+            }
+            // if every store is getting labeled how can any load ever get non-copy data?
+            assert (1==0);
+        }
     }
     else {
         // load -> store flow
         // might be a compute?
 
-        // if all the bytes are tainted with same label (singular) 
-        // and tcn = 0 on the data being stored at this sink, then
-        // this is a copy flow.
-        uint32_t num_tainted = get_ldst_labels(sinkIsStore, cpu, LoadLabel, addr, size);
-        bool its_a_copy = false;
-        if (num_tainted == size && all_labels.size() == 1) {
-            // all the bytes on the load extent are tainted
-            // and the union of labels on all bytes is a singleton (one label)
-            uint32_t num_copies = 0;
-            for (int i=0; i<size; i++) {
-                ram_addr_t ra;
-                MemTxResult mtr = PandaVirtualAddressToRamOffset(&ra, cpu, addr+i, sinkIsStore);
-                assert (mtr == MEMTX_OK);
-                uint32_t card = taint2_query_ram(ra);
-                assert (card == 1);
-                uint32_t tcn = taint2_query_tcn_ram(ra);
-                if (tcn > 0) 
-                    num_copies++;
-            }
-            if (num_copies == size) {
-                // 1. every byte on the extent (addr,size) is tainted
-                // 2. every byte has a label set with card=1 and tcn=0
-                // 3. further, union of all labels for all tainted bytes is a set containing a single label
-                // all of this together means this load -> store flow is really just a copy
-                its_a_copy = true;
-            }
-        }
-        if (its_a_copy) {
+        assert (addr.typ == MADDR);
+
+        if (its_a_copy(addr, size, num_tainted)) {
             // this compute is really a copy
-            log_copy_flows(sinkIsStore, cpu, process, thread, pc, addr, size, data);
+            assert (all_labels.size() == 1);
+            log_copy_flows(atStore, cpu, process, thread, pc, addr, size, data);
         }
         else {
-            // its a compute flow 
-            // which means one Compute flow per byte in sink
-            // collect tcn/cb/card since we have to log that stuff
-            for (int i=0; i<size; i++) {
-                ram_addr_t ra;
-                MemTxResult mtr = PandaVirtualAddressToRamOffset(&ra, cpu, addr+i, sinkIsStore);
-                if (mtr != MEMTX_OK) 
-                    continue;                                           
-                uint32_t card = taint2_query_ram(ra);
-                if (card != 0) {
-                    // this byte is tainted. 
-                    // collect labels just for this byte.
-                    all_labels.clear();
-                    collect_labels_type = LoadLabel;
-                    taint2_labelset_ram_iter(ra, collect_labels, NULL);
-                    // these are various compute kinds of things                                        
-                    uint8_t cb = taint2_query_cb_mask_ram((uint64_t)ra); // # reversible bits
-                    uint32_t tcn = taint2_query_tcn_ram(ra);    
-                    for (auto l : all_labels) {
-                        SourceInfo source = label2source[l];
-                        log_compute_flow(sinkIsStore, cpu, source, process, thread, pc, addr+i, size, data, i, card, cb, tcn);
+            if (log_compute_flows) {
+                // its a compute flow 
+                // which means one Compute flow per byte in sink
+                // collect tcn/cb/card since we have to log that stuff
+                for (int i=0; i<size; i++) {
+                    Addr b = get_addr_with_offset(addr, i);
+                    uint32_t card = taint2_query(b);
+                    if (card > 0) {
+                        // this byte is tainted. 
+                        // collect load labels just for this byte.
+                        all_labels.clear();
+                        collect_labels_type = LoadLabel;
+                        taint2_labelset_iter(b, collect_labels, NULL);
+                        // these are various compute kinds of things                                        
+                        uint8_t cb = taint2_query_cb_mask(b); // num reversible bits
+                        uint32_t tcn = taint2_query_tcn(b);    
+                        for (auto l : all_labels) {
+                            SourceInfo source = label2source[l];
+                            log_compute_flow(atStore, cpu, source, process, thread, pc, size, data, i, card, cb, tcn);
+                        }
                     }
                 }
             }    
@@ -498,13 +592,15 @@ void log_flows(bool sinkIsStore, CPUState *cpu, OsiProc *process, OsiThread *thr
             
 
 
-
+float pdice() {
+    return ( ((float)random()) / RAND_MAX);
+}
 
 // apply taint labels to this load or store source
 uint32_t label_store_or_load(bool sourceIsStore, CPUState *cpu, 
                              OsiProc *process, OsiThread *othread, 
                              target_ptr_t pc, bool in_kernel, uint64_t instr, 
-                             uint64_t addr, uint64_t data, size_t size, bool isSigned) {
+                             Addr addr, uint64_t data, size_t size, bool isSigned) {
 
     Thread thread;
     thread.pid = process->pid;
@@ -530,6 +626,18 @@ uint32_t label_store_or_load(bool sourceIsStore, CPUState *cpu,
         label2source[l] = source;
         if (debug) 
             cout << TSM_PRE " after_store: new tsm label l=" << dec << l << " " << source << "\n";
+        // write new label to pandalog
+        Panda__LogEntry ple;
+        Panda__Thread psource_thread;
+        Panda__TaintSource psource;
+        Panda__CodePoint psource_cp;
+        make_psource(source, psource_cp, psource, psource_thread);
+        psource.has_label = true;
+        psource.label = l;
+        ple = PANDA__LOG_ENTRY__INIT;
+        ple.taint_source = &psource;
+//        ple.has_taint_source = true;
+        pandalog_write_entry(&ple);        
     }
     else  {
         // old label
@@ -539,11 +647,8 @@ uint32_t label_store_or_load(bool sourceIsStore, CPUState *cpu,
     // NB: yes, we just  overstore any existing taint labels on this memory extent
     uint32_t num_labeled = 0;
     for (int i=0; i<size; i++) {
-        ram_addr_t ra;
-        MemTxResult mtr = PandaVirtualAddressToRamOffset(&ra, cpu, addr+i, sourceIsStore);
-        if (mtr != MEMTX_OK) 
-            continue;                                           
-        taint2_label_ram(ra, l);
+        Addr b = get_addr_with_offset(addr, i);
+        taint2_label(b, l);
         num_labeled ++;
     }
 
@@ -562,84 +667,275 @@ uint32_t label_store_or_load(bool sourceIsStore, CPUState *cpu,
 }
 
 
+// at store.  we want to log this update to the TSM
+void log_map_update(OsiProc *process, OsiThread *thread, target_ptr_t pc, uint64_t vaddr, size_t size) {
+//    cout << "log_map_update instr=" << (rr_get_guest_instr_count()) << " rbx=" << RBX << "  vaddr=" << vaddr << "\n";
+    Panda__Thread pthread;
+    assert (process != NULL);
+    assert (thread != NULL);
+    fill_pthread(process, thread, pthread);
+    Panda__CodePoint cp = PANDA__CODE_POINT__INIT;
+    cp.thread = &pthread;
+    cp.pc = pc;
+    Panda__TsmChange tsmc = PANDA__TSM_CHANGE__INIT;
+    tsmc.cp = &cp;
+    tsmc.vaddr = vaddr;
+    tsmc.size = size;
+    Panda__LogEntry ple = PANDA__LOG_ENTRY__INIT;
+    ple.tsm_change = &tsmc;
+    pandalog_write_entry(&ple);
+}
+    
 
+uint64_t rbx_val = 0x55d0cfe64042;
+
+map <bool, uint64_t> flow_type;
+uint64_t n = 0;
+bool found_it=false;
+
+//uint64_t num_handle_ss=0;
+//uint64_t num_deletes=0;
+
+// at either a load or a store, which we are considering a taint sink.
+// 
 // log flows from source labels seen at this sink.
 // then, label this code point as a new source
-void handle_source_sink(bool sinkIsStore, CPUState *cpu, uint64_t addr, uint64_t data, size_t size, bool isSigned) {
-    
-    if ((!taint2_enabled()) || (!track_kernel && (panda_in_kernel(cpu)))) return;
+// NB: addr,size is are the sink
+//
+bool handle_source_sink(bool atStore, CPUState *cpu, Addr addr, uint64_t vaddr, uint64_t data, size_t size, bool isSigned) {
 
-    // coz this is in bits
-    size /= 8;
+    if (vaddr<=rbx_val && rbx_val<(vaddr+size)) {
+        printf ("3 saw 0x55d0cfe64042 store\n");
+    }
+
     
+    if (!taint2_enabled())
+        return false;
+
+    if (!track_kernel && (panda_in_kernel(cpu))) 
+        return false;
+    
+
+/*
+    num_handle_ss ++;
+    if ((num_handle_ss % 1000) == 0) {
+        cout << dec << num_deletes << " deletes out of " << num_handle_ss << "\n";
+    }
+*/
+
     target_ulong pc = cpu->panda_guest_pc;
+
+/*
+    cout << "handle_source_sink: instr = " << dec << rr_get_guest_instr_count() << " pc=" << hex << pc << "\n";
+
+    if (!found_it && rr_get_guest_instr_count() >= 13232800) {
+        cout << "I'm in that bb -- instr = " << dec << rr_get_guest_instr_count() << " pc=" << hex << pc << "\n";
+        found_it = true;
+    }
+    if (pc >= 0x00007f6c6b9cb148 && pc <= 0x00007f6c6b9cb188) {
+        cout << "I'm in that bb -- instr = " << rr_get_guest_instr_count() << "\n";
+    }
+*/
     
     if (debug) 
-        cout << TSM_PRE << " handle_sink: " << (sinkIsStore ? "store" : "load")
-             << " @ pc=" << hex << pc << " addr=" << addr << " size=" << size << "\n";
-    
-    // obtain data at sink
-    int size32max = (size < 32) ? size : 32;
-    uint8_t buffer[32];
-    int rv = panda_virtual_memory_read(cpu, addr, buffer, size32max);
-    if (rv == -1) {
-        // not there. is that even possible?
-        // certainly it means we can't taint anything right?
-        if (debug) 
-            cout << TSM_PRE << " Attempted to get data at sink: " << dec << size32max 
-                 << " bytes at addr=" << hex << addr << " : failed?\n";
-        return;
-    }
-    
-    if (debug) {
-        cout << TSM_PRE << " Data at sink(first part): [";
-        for (int i=0; i<size32max; i++)
-            printf ("%02x ", buffer[i]);
-        cout << "]\n";
-    }
+        cout << TSM_PRE << " handle_sink: " << (atStore ? "store" : "load")
+             << " @ pc=" << hex << pc << " addr=" << (addr_str(addr)) << " size=" << size << "\n";
 
-    // need current process and thread and mappings to be able to label
-    // source or to log flows
+//    flow_type[atStore] += 1;
+//    n ++;
+//    if ((n % 1000) == 0) 
+//        cout << "c(L->S)=" << dec << flow_type[true] << " c(S->L)=" << flow_type[false] << "\n";
+
+    // need current process and thread and mappings to be able to
+    // log flows or label a new source
+
     OsiProc *current;
-    GArray *ms;
+//    GArray *ms;
     OsiThread *othread;
     current = get_current_process(cpu); 
+    bool able_to_handle = false;
     if (current && current->pid !=0) {
-        ms = get_mappings(cpu, current); 
+//        ms = get_mappings(cpu, current); 
         othread = get_current_thread(cpu);
-        if (ms && othread) {
-            // getting to here means we have process, thread, and mappings.
-            // check taint on data just stored and log any load -> store flows
-            log_flows(sinkIsStore, cpu, current, othread, pc, addr, size, data);            
-            // apply taint labels to stopred data.
-            label_store_or_load(sinkIsStore, cpu, current, othread, 
-                                pc, panda_in_kernel(cpu), rr_get_guest_instr_count(), 
-                                addr, data, size, isSigned);
+//        if (ms && othread) {
+        if (othread) {
+//            if (pdice() < 0.1) {
+            if (true) {
+                able_to_handle = true;
+                if (log_flows_mode != FlowsNone) {
+                    // getting to here means we have process, thread, and mappings.
+                    // check taint on data just stored and log any flows
+                    log_flows(atStore, cpu, current, othread, pc, addr, size, data);            
+                    // apply taint labels to data just loaded or stored
+                    label_store_or_load(atStore, cpu, current, othread, 
+                                        pc, panda_in_kernel(cpu), 
+                                        rr_get_guest_instr_count(), 
+                                        addr, data, size, isSigned);
+                }
+                if (log_map_updates && atStore) {
+                    log_map_update(current, othread, pc, vaddr, size);
+                }
+            }
         }
-        if (ms) g_array_free(ms, true);
+//        if (ms) cleanup_garray(ms);        
         if (othread) free_osithread(othread);        
     }        
     if (current) free_osiproc(current);
+
+    if (!able_to_handle) {
+        // we weren't able to log flows or apply taint labels
+        if (atStore) {
+//            num_deletes ++;
+            // so we should make sure to clear taint labels here 
+            // since otherwise we could be storing compute stuff. 
+            for (int i=0; i<size; i++) {
+                Addr a = get_addr_with_offset(addr,i);
+                taint2_delete(a);
+            }
+        }
+        return false;
+    }
+
+    return true;
 }
+
+        
 
 
 // this will be called semantically just before a load, meaning before emulation 
 // of the load or any taint prop
-void before_load(CPUState *cpu, uint64_t addr, uint64_t data, size_t size, bool isSigned) {
-    handle_source_sink(/*sinkIsStore = */ false, cpu, addr, data, size, isSigned);
-}    
+//void before_load(CPUState *cpu, uint64_t addr, uint64_t data, size_t size, bool isSigned) {
+//    handle_source_sink(/* atStore = */ false, cpu, addr, data, size, isSigned);
+//}    
 
+
+uint64_t num_dt_card = 0;
+uint64_t num_dt_tcn = 0;
+uint64_t iii = 0;
+
+// taint has been propagated and a is the addr
+void taint_change (Addr addr, uint64_t size) {
+/*
+    iii ++;
+    if ((iii%100000) == 0) {
+        cout << "delete taint card,tcn: " << num_dt_card << "," << num_dt_tcn << "\n";
+    }
+*/
+    // stay with me.
+    // (addr,size) is the destination of this taint change. If that dest is a 
+    // register (or just *not* memory?) AND it is tainted AND the taint 
+    // labels indicate current data there is from a STORE source, then this 
+    // kinda has to be just after the load of that data.  That is, under the
+    // assumption that we now query it (looking for store->load flows) and
+    // then immediately apply new taint labels indicating this src is a load.
+//    if (addr.typ != MADDR) { 
+        // is there taint on this non-memory extent?
+        // and how many of the bytes are stores?
+        bool any_taint = false;
+        uint32_t num_bytes_store = 0;
+        for (int i=0; i<size; i++) {
+            // this is a register so we offset to get at its bytes
+            Addr b = get_addr_with_offset(addr, i);
+            uint32_t n = taint2_query(b);
+            // only consider n=1 (singleton set)
+            if (n!=1) {
+/*
+                num_dt_card ++;
+                taint2_delete(b);
+*/
+                continue;
+            }
+            if (taint2_query_tcn(b) > max_tcn) {
+/*
+                num_dt_tcn ++;
+                taint2_delete(b);
+*/
+                continue;
+            }                
+
+            any_taint = true;
+            // has to be tcn=0 otherwise it cant be from a store
+            all_labels.clear();
+            // get that label and determine if its a store
+            collect_labels_type = StoreLabel;
+            taint2_labelset_iter(b, collect_labels, NULL);
+            // non-store label             
+            if (all_labels.size() == 0) continue;
+            // a is tainted, and its labelset is a singleton set
+            // and tcn=0 and its one label is a store label
+            num_bytes_store ++;
+        }
+ 
+        if (addr.typ != MADDR) { 
+            if (any_taint && num_bytes_store == size) {
+//            handle_source_sink(/* atStore = */ false, current_cpu, addr, /*vaddr=*/ 0, 0, size, false);    
+            }
+        }
+  //  }
+
+}
+
+
+void before_block_exec(CPUState *cpu, TranslationBlock *tb) {
+    uint64_t instr = rr_get_guest_instr_count();
+    if (instr == 13232800) {
+        cout << "instr=" << instr << " pc=" << tb->pc << " rbx=" << EBX << "\n";
+        for (int i=0; i<10; i++) {
+            uint8_t byte;
+            int res = panda_virtual_memory_read(cpu, EBX, &byte, 1);
+            printf("i=%d ", i);
+            if (res == -1) 
+                printf(" ---\n");
+            else
+                printf ("i=%d byte=%x %c\n", i, byte, byte);
+        }
+    }
+}
+
+
+
+void after_store2(CPUState *env, target_ptr_t pc, target_ptr_t addr, size_t size, uint8_t *buf) {
+    if (addr<=rbx_val && rbx_val<(addr+size)) {
+        printf ("2 saw 0x55d0cfe64042 store\n");
+    }   
+}
+    
+
+//set<uint64_t> ptrs;
 
 // this will be called semantically just after a store, meaning after emulation 
 // of the store and any taint prop
-void after_store(CPUState *cpu, uint64_t addr, uint64_t data, size_t size, bool isSigned) {
-    handle_source_sink(/*sinkIsStore = */ true, cpu, addr, data, size, isSigned);
+void after_store(CPUState *cpu, uint64_t vaddr, uint64_t data, size_t size, bool isSigned) {    
+    if (vaddr<=rbx_val && rbx_val<(vaddr+size)) {
+        printf ("saw 0x55d0cfe64042 store\n");
+    }
+    size_t size_in_bytes = size/8;
+//    cout << "vaddr = " << hex << vaddr << "\n";
+    // make sure all the bytes on this extent ar mapped
+    for (int i=0; i<size_in_bytes; i++) {
+        pair p = get_maddr(cpu, true, vaddr + i);
+        if (p.first == false) return;
+    }
+    pair p = get_maddr(cpu, true, vaddr);
+    handle_source_sink(/* sinkIsStore = */ true, cpu, p.second, vaddr, data, size_in_bytes, isSigned);
+
+/*
+    if (labeled && size==8 && data > 0xffffffff) {
+        ptrs.insert(data);
+    }
+*/
 }    
 
  
 
 
-
+/*
+void after_load(CPUState *cpu, uint64_t addr, uint64_t data, size_t size, bool isSigned) {
+    if (size == 8 && ptrs.count(data)) {
+        cout << "data=" << hex << data << " was previously labeled and just loaded\n";
+    }
+}    
+*/
 
 bool init_plugin(void *self) {
 
@@ -652,33 +948,55 @@ bool init_plugin(void *self) {
     panda_arg_list *args = panda_get_args("tsm");
 
     track_kernel = panda_parse_bool_opt(args, "kernel", "turn on debug output");
-    if (track_kernel)
-        cout << TSM_PRE << "tracking kernel stores & loads too\n";
-    else
-        cout << TSM_PRE << "NOT tracking kernel stores & loads\n";
-    summary = panda_parse_bool_opt(args, "summary", "summary output");
-    cout << TSM_PRE << "summary mode is " << (summary ? "ON" : "OFF") << "\n";
-    
+    if (track_kernel) cout << TSM_PRE << "tracking kernel stores & loads\n";
+    else cout << TSM_PRE << "NOT tracking kernel stores & loads\n";
+
+    log_map_updates = panda_parse_bool_opt(args, "map_updates", "log updates to tsm");
+    if (log_map_updates) cout << TSM_PRE << "logging updates to tsm\n";
+    else cout << TSM_PRE << "NOT logging updates to tsm\n";
+
+    log_flows_mode = (FlowsMode) panda_parse_uint32_opt(args, "flows", 0, "0 no flows (default), 1 only store->load flows, 2 only load->store flows, 3 both flows");
+    if (log_flows_mode) {
+        if (log_flows_mode & FLOWS_LOAD_STORE) 
+            cout << TSM_PRE << "logging load->store flows\n";
+        if (log_flows_mode & FLOWS_STORE_LOAD) 
+            cout << TSM_PRE << "logging store->load flows\n";
+    }
+    else 
+        cout << TSM_PRE << "NOT logging any flows\n";
+        
+    log_compute_flows = panda_parse_bool_opt(args, "compute", "log compute flows");
+    if (log_compute_flows) cout << TSM_PRE << "logging compute flows\n";
+    else cout << TSM_PRE << "NOT logging compute flows\n";
+
+    max_tcn =  panda_parse_uint32_opt(args, "max_tcn", 5, "max tcn before taint is deleted (need some tcn to support tainted_branch)");
+    printf ("max_tcn=%d\n", max_tcn);
+
     panda_cb pcb;
 
+    // just to turn on taint (unfortunate)
     pcb.before_block_translate = enable_taint;
     panda_register_callback(self, PANDA_CB_BEFORE_BLOCK_TRANSLATE, pcb);
 
-
-    // This is in order to label stores
-    // but first we query the data just stored
-    // to see if it has a load label
+    // This is to query and then label stores
     pcb.after_store = after_store;
     panda_register_callback(self, PANDA_CB_AFTER_STORE, pcb);
 
-    // ... and this is to query loads
-    // and to be able to label loads
-    pcb.before_load = before_load;
-    panda_register_callback(self, PANDA_CB_BEFORE_LOAD, pcb);
+    pcb.before_block_exec = before_block_exec;
+    panda_register_callback(self, PANDA_CB_BEFORE_BLOCK_EXEC, pcb);
 
 
+    pcb.virt_mem_after_write = after_store2;
+    panda_register_callback(self, PANDA_CB_VIRT_MEM_AFTER_WRITE, pcb);
 
+//    if (log_flows_mode == FlowsBoth) {
+      // this is to query loads
+        //    pcb.before_load = before_load;
+        //    panda_register_callback(self, PANDA_CB_BEFORE_LOAD, pcb);
 
+        // this is to query and then label loads
+        PPP_REG_CB("taint2", on_taint_change, taint_change);
+//    }
 
     // this will give us accurate pc within a bb
     panda_enable_precise_pc();
@@ -689,47 +1007,4 @@ bool init_plugin(void *self) {
 
 
 void uninit_plugin(void *) {
-
-    if (summary) {
-/*
-        Panda__Thread th_source, th_sink;
-        th_source = th_sink = PANDA__THREAD__INIT;
-        Panda__CodePoint cp_source, cp_sink;
-        cp_source = cp_sink = PANDA__CODE_POINT__INIT;
-        Panda__Flow wrf = PANDA__STORE_LOAD_FLOW__INIT;
-        Panda__LogEntry ple = PANDA__LOG_ENTRY__INIT;
-        cout << (flows.size()) << " unique flows -- pandalogging\n";
-        for (auto kvp : flows) {
-            auto flow = kvp.first;
-            auto [store_thread, load_thread, store_pc, load_pc, store_instr, load_instr] = flow;
-            uint64_t count = kvp.second;
-            if (pandalog) {
-                th_source.pid = store_thread.pid;
-                th_source.tid = store_thread.tid;
-                th_source.create_time = store_thread.create_time;
-                th_sink.pid = load_thread.pid;
-                th_sink.tid = load_thread.tid;
-                th_sink.create_time = load_thread.create_time;
-                cp_source.thread = &th_source;
-                cp_source.pc = store_pc;
-                cp_source.instr = store_instr;
-                cp_sink.thread = &th_sink;
-                cp_sink.pc = load_pc;
-                cp_sink.instr = load_instr;               
-                wrf.source = &cp_source;
-                wrf.sink = &cp_sink;
-                wrf.count = count;
-                wrf.has_count = true;
-                ple.store_load_flow = &wrf;
-                pandalog_store_entry(&ple);
-            }
-            else {
-                cout << TSM_PRE << " Flow (count=" << count << " from " << store_thread << " to " << load_thread << "\n";
-                cout << TSM_PRE << "    store @ (instr=" << dec << store_instr << ",pc=" << hex << store_pc << ")";
-                cout <<            "    load  @ (instr=" << dec << load_instr << ",pc=" << hex << load_pc << ")\n";
-            }
-        }
-    }
-*/
-}
 }
