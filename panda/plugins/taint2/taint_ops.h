@@ -102,6 +102,11 @@ void taint_pointer(Shad *shad_dest, uint64_t dest, Shad *shad_ptr, uint64_t ptr,
                    uint64_t ptr_size, Shad *shad_src, uint64_t src,
                    uint64_t size, uint64_t is_store);
 
+// allows callbacks on pointers on_ptr_load, on_ptr_store
+void taint_pointer_check(uint64_t ptr_addr, uint64_t ptr_size, uint64_t is_store);
+
+
+
 // Only generate when signed and dest_size > src_size.
 // Otherwise it should just be a copy.
 void taint_sext(Shad *shad, uint64_t dest, uint64_t dest_size, uint64_t src,

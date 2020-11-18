@@ -116,16 +116,20 @@ static void taint_branch_run(Shad *shad, uint64_t src, uint64_t size)
     PPP_RUN_CB(on_branch2, a, size);
 }
 
-void taint_pointer_run(uint64_t src, uint64_t ptr, uint64_t dest, bool is_store, uint64_t size) {
+
+void taint_pointer_check_run(uint64_t ptra, uint64_t ptr_size, bool is_store) {
     // I think this has to be an LLVM register
-    Addr ptr_addr = make_laddr(ptr / MAXREGSIZE, 0);
+    Addr ptr_addr = make_laddr(ptra / MAXREGSIZE, 0);
     if (is_store) {
-        PPP_RUN_CB(on_ptr_store, ptr_addr, dest, size);
+        PPP_RUN_CB(on_ptr_store, ptr_addr, ptr_size);
     }
     else {
-        PPP_RUN_CB(on_ptr_load, ptr_addr, src, size);
+        PPP_RUN_CB(on_ptr_load, ptr_addr, ptr_size);
     }
 }
+
+
+
 
 void taint_after_ld_run(uint64_t rega, uint64_t addr, uint64_t size) {
     Addr reg = make_laddr(rega / MAXREGSIZE, 0);
@@ -186,6 +190,7 @@ bool PandaTaintFunctionPass::doInitialization(Module &M) {
     PTV.deleteF = M.getFunction("taint_delete"),
     PTV.mixF = M.getFunction("taint_mix"),
     PTV.pointerF = M.getFunction("taint_pointer"),
+    PTV.pointerTaintCheck = M.getFunction("taint_pointer_check"),
     PTV.mixCompF = M.getFunction("taint_mix_compute"),
     PTV.mulCompF = M.getFunction("taint_mul_compute"),
     PTV.parallelCompF = M.getFunction("taint_parallel_compute"),
@@ -255,6 +260,7 @@ bool PandaTaintFunctionPass::doInitialization(Module &M) {
     ADD_MAPPING(taint_delete);
     ADD_MAPPING(taint_mix);
     ADD_MAPPING(taint_pointer);
+    ADD_MAPPING(taint_pointer_check);
     ADD_MAPPING(taint_mix_compute);
     ADD_MAPPING(taint_mul_compute);
     ADD_MAPPING(taint_parallel_compute);
@@ -599,6 +605,18 @@ void PandaTaintVisitor::insertTaintPointer(Instruction &I,
     inlineCallAfter(*popCI, pointerF, args);
 
     inlineCall(popCI);
+}
+
+
+void PandaTaintVisitor::insertTaintPointerCheck(Instruction &I,
+        Value *ptr, Value *val, bool is_store) {    
+    LLVMContext &ctx = I.getContext();
+    vector<Value *> args{
+        constSlot(ptr), 
+        const_uint64(ctx, getValueSize(ptr)),
+        const_uint64(ctx, is_store)
+    };
+    inlineCallAfter(I, pointerTaintCheck, args);
 }
 
 
@@ -1381,6 +1399,9 @@ void PandaTaintVisitor::visitCallInst(CallInst &I) {
             } else {
                 insertTaintCopy(I, llvConst, &I, memConst, NULL, getValueSize(&I));
             }
+            if (!isa<Constant>(ptr)) {
+                insertTaintPointerCheck(I, ptr, &I, false);
+            }
             return;
         } else if (stFuncs.count(calledName) > 0) {
             Value *ptr = I.getArgOperand(1);
@@ -1391,6 +1412,9 @@ void PandaTaintVisitor::visitCallInst(CallInst &I) {
                 insertTaintDelete(I, memConst, NULL, const_uint64(ctx, getValueSize(val)));
             } else {
                 insertTaintCopy(I, memConst, NULL, llvConst, val, getValueSize(val));
+            }
+            if (!isa<Constant>(ptr)) {
+                insertTaintPointerCheck(I, ptr, &I, true);
             }
             return;
         } else if (unaryMathFuncs.count(calledName) > 0) {

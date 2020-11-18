@@ -34,8 +34,8 @@ typedef const std::set<uint32_t> *LabelSetP;
 typedef void (*on_branch2_t) (Addr, uint64_t);
 typedef void (*on_indirect_jump_t) (Addr, uint64_t);
 typedef void (*on_taint_change_t) (Addr, uint64_t);
-typedef void (*on_ptr_load_t) (Addr, uint64_t, uint64_t);
-typedef void (*on_ptr_store_t) (Addr, uint64_t, uint64_t);
+typedef void (*on_ptr_load_t) (Addr, uint64_t);
+typedef void (*on_ptr_store_t) (Addr, uint64_t);
 typedef void (*on_after_load_t) (Addr, uint64_t, uint64_t);
 typedef void (*on_after_store_t) (Addr, uint64_t, uint64_t);
  
@@ -87,6 +87,7 @@ struct ShadowState {
     }
 };
 
+
 extern "C" {
 Addr make_haddr(uint64_t a);
 Addr make_iaddr(uint64_t a);
@@ -94,5 +95,6 @@ Addr make_maddr(uint64_t a);
 Addr make_laddr(uint64_t a, uint64_t o);
 Addr make_greg(uint64_t r, uint16_t off);
 }
+
 
 #endif
