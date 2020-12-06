@@ -50,6 +50,7 @@ message TsmChange {
     required CodePoint cp = 1;           // code that did the write
     required uint64 vaddr = 2;           // addr / size of the write
     required uint32 size = 3;
+    required uint32 label = 4;           // the taint label
 }
 
 optional TaintSource taint_source = 59;
