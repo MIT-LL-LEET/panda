@@ -126,8 +126,12 @@ bool init_plugin(void *self) {
     panda_require("osi"); 
     assert(init_osi_api());
     panda_require("syscalls2");
-    
+
+    #ifdef TARGET_X86_64
     PPP_REG_CB("syscalls2", on_sys_mmap_return, mmap_return);
+    #else
+    /* #error "No on_sys_mmap_return for target" */
+    #endif
 
     panda_cb pcb;    
     pcb.before_block_exec = before_block;
