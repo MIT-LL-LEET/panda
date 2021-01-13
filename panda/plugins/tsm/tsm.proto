@@ -27,7 +27,15 @@ message TaintSink {
     required bool is_store = 5;        // indicates load/store
 }    
 
+// used to generate TSM 
+message TsmChange {
+    required CodePoint cp = 1;           // code that did the write
+    required uint64 vaddr = 2;           // addr / size of the write
+    required uint32 size = 3;
+    required uint32 label = 4;           // the taint label
+}
 
+// flows for pandelephant/LEET/ghidra
 // this is only load -> store
 // plus the computation that happened
 // this one has offset since we need to record each flow to
@@ -45,16 +53,5 @@ message TaintFlow {
 }
 
 
-
-message TsmChange {
-    required CodePoint cp = 1;           // code that did the write
-    required uint64 vaddr = 2;           // addr / size of the write
-    required uint32 size = 3;
-    required uint32 label = 4;           // the taint label
-}
-
-optional TaintSource taint_source = 59;
-
 optional TaintFlow taint_flow = 57;
-
-optional TsmChange tsm_change = 58;
+optional TsmChange tsm_change = 59;
