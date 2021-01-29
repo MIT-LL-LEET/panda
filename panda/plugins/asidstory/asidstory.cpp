@@ -61,6 +61,9 @@ extern "C" {
 
 #include "asidstory.h"
 
+#include "syscalls2/syscalls_ext_typedefs.h"
+#include "syscalls2/syscalls2_info.h"
+#include "syscalls2/syscalls2_ext.h"
 
 
 bool init_plugin(void *);
@@ -211,6 +214,7 @@ map<Process, set<Pid>> process_tids;
 map<Process, Asid> process_asid;
 // parent pid for this process
 map<Process, Pid> process_ppid;
+
 
 typedef std::pair<Process, ProcessData> ProcessKV;
 
@@ -436,25 +440,55 @@ set <Process> all_procs;
 void save_proc_range(uint64_t instr_end) {
 
     const Process process(first_good_proc->pid, first_good_proc->create_time);
+
     // add name alias
     process_names[process].insert(first_good_proc->name);
     // add to set of tids observed
     process_tids[process].insert(first_good_proc_tid);
 
     // really this process should have only one parent and it should not change
-    if (process_ppid.count(process) == 0)
+    if (process_ppid.count(process) == 0) {
         process_ppid[process] = first_good_proc->ppid;
-    else
-        assert (process_ppid[process] == first_good_proc->ppid);
+    } else {
+        // It's okay if the PPID was originally 1 (init) then changed to another process - just record init was the parent.
+        // It's also okay if the PPID was non-1 (not init) but then changes to 1 (process was reaped)
+        // We don't currently support arbitrary PPID changes (e.g., as caused by prctl)
+        assert (process_ppid[process] == first_good_proc->ppid || process_ppid[process] == 1 || first_good_proc->ppid == 1);
+    }
 
     // process asid also should not change
     if (process_asid.count(process) == 0)
         process_asid[process] = first_good_proc->asid;
     else {
         if (process_asid[process] != first_good_proc->asid)  {
+
             cout << "asid for process changed! " << first_good_proc->name << " pid=" << first_good_proc->pid << "\n";
             cout << "... was 0x" << hex << process_asid[process] << " is " << first_good_proc->asid << "\n";
-        }        
+
+/*
+            GArray *procs = get_processes(first_cpu);
+            if (procs != NULL) {
+                for (int i=0; i<procs->len; i++) {
+                    OsiProc *proc = &g_array_index(procs, OsiProc, i);
+                    cout << "proc[pid=" << dec << proc->pid << ",create_time=" << proc->create_time
+                         << ",name=" << proc->name << ",taskd=" << hex << proc->taskd << ",asid=" << proc->asid
+                         << ",ppid=" << dec << proc->ppid << "]: ";
+                    for (auto p : all_procs) {
+                        if (p.pid == proc->pid && p.create_time == proc->create_time) {
+                            cout << "asid=" << hex << process_asid[p] << " ppid=" << dec << process_ppid[p] << "\n";
+                            for (auto name : process_names[p]) cout << "  name=" << name;
+                            cout << "\n";
+                            for (auto tid : process_tids[p]) cout << "  tid=" << tid;
+                            break;
+                        }
+                    }
+                    cout << "\n";
+                }
+            }
+*/
+        }
+  //      assert (process_asid[process] == first_good_proc->asid);
+
       process_asid[process] = first_good_proc->asid;
     }
 
@@ -714,6 +748,22 @@ string read_guest_null_terminated_string(CPUState *cpu, uint64_t addr) {
 
 
 
+// 59 long sys_execve(const char __user *filename, const char __user *const __user *argv, const char __user *const __user *envp);
+void execve_cb(CPUState *cpu, target_ptr_t pc, target_ptr_t filename, target_ptr_t argv, target_ptr_t envp) {
+    string filename_s = read_guest_null_terminated_string(cpu, filename);
+    cout << "Entering execve -- filename = [" << filename_s << "\n";
+}
+
+
+// 322 long sys_execveat(int dfd, const char __user *filename, const char __user *const __user *argv, const char __user *const __user *envp, int flags);
+void execveat_cb (CPUState* cpu, target_ptr_t pc, int dfd, target_ptr_t filename, target_ptr_t argv, target_ptr_t envp, int flags) {
+//void execveat(CPUState *cpu, target_ulong pc, uint64_t filename, uint64_t argv, uint64_t envp, int flags) {
+    string filename_s = read_guest_null_terminated_string(cpu, filename);
+    cout << "Entering execveat -- filename = [" << filename_s << "\n";
+ }
+
+
+
 bool init_plugin(void *self) {
     panda_require("osi");
 
@@ -726,6 +776,16 @@ bool init_plugin(void *self) {
 
     pcb.before_block_exec = asidstory_before_block_exec;
     panda_register_callback(self, PANDA_CB_BEFORE_BLOCK_EXEC, pcb);
+
+    #if defined(TARGET_PPC)
+        fprintf(stderr, "[ERROR] asidstory: PPC architecture not supported by syscalls2!\n");
+        return false;
+    #else
+        panda_require("syscalls2");
+        assert(init_syscalls2_api());
+        PPP_REG_CB("syscalls2", on_sys_execve_enter, execve_cb);
+        PPP_REG_CB("syscalls2", on_sys_execveat_enter, execveat_cb);
+    #endif
 
     panda_arg_list *args = panda_get_args("asidstory");
     num_cells = std::max(panda_parse_uint64_opt(args, "width", 100, "number of columns to use for display"), UINT64_C(80)) - NAMELEN - 5;
