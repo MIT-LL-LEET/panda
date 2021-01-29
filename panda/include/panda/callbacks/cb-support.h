@@ -53,6 +53,7 @@ exit 0
  ***************************************************************************/
 #include <stdbool.h>
 #include "panda/types.h"
+#include "panda/tcg-mmu-callbacks-regfind.h"
 #ifndef EXEC_ALL_H
 // If this file is included from a file that doesn't define TranslationBlock (e.g., memory.c), we still need to be valid
 //typedef struct {} TranslationBlock;
@@ -133,14 +134,9 @@ bool panda_callbacks_guest_hypercall(CPUState *env);
 /* invoked from translate-all.c */
 void panda_callbacks_cpu_restore_state(CPUState *env, TranslationBlock *tb);
 
-void panda_callbacks_before_load(CPUState* env, uint64_t addr, uint64_t data, size_t width, bool isSigned);
-void panda_callbacks_after_load(CPUState* env, uint64_t addr, uint64_t data, size_t width, bool isSigned);
-void panda_callbacks_before_store(CPUState* env, uint64_t addr, uint64_t data, size_t width, bool isSigned);
-void panda_callbacks_after_store(CPUState* env, uint64_t addr, uint64_t data, size_t width, bool isSigned);
-
-void helper_panda_beforeafter_load32(uint32_t addrlo, uint32_t addrhi, uint32_t datalo, uint32_t datahi, size_t width, bool isSigned, bool isPre, void* cpu);
-void helper_panda_beforeafter_load64(uint64_t addrlo, uint64_t datalo, size_t width, bool isSigned, bool isPre, void* cpu);
-void helper_panda_beforeafter_store32(uint32_t addrlo, uint32_t addrhi, uint32_t datalo, uint32_t datahi, size_t width, bool isSigned, bool isPre, void* cpu);
-void helper_panda_beforeafter_store64(uint64_t addrlo, uint64_t datalo, size_t width, bool isSigned, bool isPre, void* cpu);
+void panda_callbacks_before_load(CPUState* env, uint64_t addr, uint64_t data, size_t width, bool isSigned, enum panda_gp_reg_enum target_reg);
+void panda_callbacks_after_load(CPUState* env, uint64_t addr, uint64_t data, size_t width, bool isSigned, enum panda_gp_reg_enum target_reg);
+void panda_callbacks_before_store(CPUState* env, uint64_t addr, uint64_t data, size_t width, bool isSigned, enum panda_gp_reg_enum target_reg);
+void panda_callbacks_after_store(CPUState* env, uint64_t addr, uint64_t data, size_t width, bool isSigned, enum panda_gp_reg_enum target_reg);
 
 void panda_callbacks_before_tcg_codegen(CPUState *env, TranslationBlock *tb);

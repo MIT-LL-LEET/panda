@@ -21,10 +21,13 @@ extern "C" {
 bool init_plugin(void*);
 void uninit_plugin(void*);
 
-static void before_load(CPUState* env, uint64_t addr, uint64_t data, size_t width, bool isSigned);
-static void after_load(CPUState* env, uint64_t addr, uint64_t data, size_t width, bool isSigned);
-static void before_store(CPUState* env, uint64_t addr, uint64_t data, size_t width, bool isSigned);
-static void after_store(CPUState* env, uint64_t addr, uint64_t data, size_t width, bool isSigned);
+void panda_uhaul_disas(FILE* out, CPUState* env, target_ulong pc, int nb_insn);
+
+static void before_load(CPUState* env, uint64_t addr, uint64_t data, size_t width, bool isSigned, enum panda_gp_reg_enum target_reg);
+static void after_load(CPUState* env, uint64_t addr, uint64_t data, size_t width, bool isSigned, enum panda_gp_reg_enum target_reg);
+static void before_store(CPUState* env, uint64_t addr, uint64_t data, size_t width, bool isSigned, enum panda_gp_reg_enum target_reg);
+static void after_store(CPUState* env, uint64_t addr, uint64_t data, size_t width, bool isSigned, enum panda_gp_reg_enum target_reg);
+static int insn_exec(CPUState *env, target_ptr_t pc);
 }
 
 static const char* OutputFileName;
@@ -44,61 +47,59 @@ static inline bool in_kernelspace(CPUState* cpu)
 #endif
 }
 
-static void before_load(CPUState* env, uint64_t addr, uint64_t data, size_t width, bool isSigned)
+const char* target_reg_name(enum panda_gp_reg_enum target_reg)
+{
+    if (target_reg == PANDA_GP_REG_INVALID)
+        return "<Unknown>";
+    if (target_reg < 0 || target_reg >= PANDA_GP_REG_NAMES_COUNT)
+        return "<Illegal>";
+    return PANDA_GP_REG_NAMES[target_reg];
+}
+
+static void dump_ldstr_info(const char* time, const char* op, FILE* OutputFile, CPUState* env, uint64_t addr, uint64_t data, size_t width, bool isSigned, enum panda_gp_reg_enum target_reg)
 {
     uint64_t cpu_pc = 0;
     #if defined(TARGET_I386)
     cpu_pc = ((CPUArchState*)env->env_ptr)->eip;
     #endif
-    if (in_kernelspace(env))
-        return;
-    fprintf(OutputFile, "Before %2d bit %8s  Load on CPU %p: IP %#18" PRIx64 " Addr %#18" PRIx64 "\n", (int)width, (isSigned) ? "signed": "unsigned", env, cpu_pc, addr);
+    fprintf(OutputFile, "%6s %2d bit %8s %5s on CPU %p: IP %#18" PRIx64 " PIP %#18" PRIx64 " Addr %#18" PRIx64 " Data %#18" PRIx64 " Target: %s\n", time, (int)width, (isSigned) ? "signed": "unsigned", op, env, cpu_pc, env->panda_guest_pc, addr, data, target_reg_name(target_reg));
+    fprintf(OutputFile, "\t");
+    panda_uhaul_disas(OutputFile, env, env->panda_guest_pc, 1);
+    fprintf(OutputFile, "\n");
     #if defined(TARGET_I386)
     if (bDumpCPU)
         x86_cpu_dump_state(env, OutputFile, fprintf, 0);
     #endif
 }
-static void after_load(CPUState* env, uint64_t addr, uint64_t data, size_t width, bool isSigned)
+static void before_load(CPUState* env, uint64_t addr, uint64_t data, size_t width, bool isSigned, enum panda_gp_reg_enum target_reg)
 {
-    uint64_t cpu_pc = 0;
-    #if defined(TARGET_I386)
-    cpu_pc = ((CPUArchState*)env->env_ptr)->eip;
-    #endif
     if (in_kernelspace(env))
         return;
-    fprintf(OutputFile, " After %2d bit %8s  Load on CPU %p: IP %#18" PRIx64 " Addr %#18" PRIx64 " Data %#18" PRIx64 "\n", (int)width, (isSigned) ? "signed": "unsigned", env, cpu_pc, addr, data);
-    #if defined(TARGET_I386)
-    if (bDumpCPU)
-        x86_cpu_dump_state(env, OutputFile, fprintf, 0);
-    #endif
+    dump_ldstr_info("Before", "Load", OutputFile, env, addr, data, width, isSigned, target_reg);
 }
-static void before_store(CPUState* env, uint64_t addr, uint64_t data, size_t width, bool isSigned)
+static void after_load(CPUState* env, uint64_t addr, uint64_t data, size_t width, bool isSigned, enum panda_gp_reg_enum target_reg)
 {
-    uint64_t cpu_pc = 0;
-    #if defined(TARGET_I386)
-    cpu_pc = ((CPUArchState*)env->env_ptr)->eip;
-    #endif
     if (in_kernelspace(env))
         return;
-    fprintf(OutputFile, "Before %2d bit %8s Store on CPU %p: IP %#18" PRIx64 " Addr %#18" PRIx64 " Data %#18" PRIx64 "\n", (int)width, (isSigned) ? "signed": "unsigned", env, cpu_pc, addr, data);
-    #if defined(TARGET_I386)
-    if (bDumpCPU)
-        x86_cpu_dump_state(env, OutputFile, fprintf, 0);
-    #endif
+    dump_ldstr_info("After", "Load", OutputFile, env, addr, data, width, isSigned, target_reg);
 }
-static void after_store(CPUState* env, uint64_t addr, uint64_t data, size_t width, bool isSigned)
+static void before_store(CPUState* env, uint64_t addr, uint64_t data, size_t width, bool isSigned, enum panda_gp_reg_enum target_reg)
 {
-    uint64_t cpu_pc = 0;
-    #if defined(TARGET_I386)
-    cpu_pc = ((CPUArchState*)env->env_ptr)->eip;
-    #endif
     if (in_kernelspace(env))
         return;
-    fprintf(OutputFile, " After %2d bit %8s Store on CPU %p: IP %#18" PRIx64 " Addr %#18" PRIx64 " Data %#18" PRIx64 "\n", (int)width, (isSigned) ? "signed": "unsigned", env, cpu_pc, addr, data);
-    #if defined(TARGET_I386)
-    if (bDumpCPU)
-        x86_cpu_dump_state(env, OutputFile, fprintf, 0);
-    #endif
+    dump_ldstr_info("Before", "Store", OutputFile, env, addr, data, width, isSigned, target_reg);
+}
+static void after_store(CPUState* env, uint64_t addr, uint64_t data, size_t width, bool isSigned, enum panda_gp_reg_enum target_reg)
+{
+    if (in_kernelspace(env))
+        return;
+    dump_ldstr_info("After", "Store", OutputFile, env, addr, data, width, isSigned, target_reg);
+}
+
+__attribute__((unused))
+static int insn_exec(CPUState *env, target_ptr_t pc)
+{
+    return 0;
 }
 
 bool init_plugin(void* self)
@@ -135,6 +136,9 @@ bool init_plugin(void* self)
     panda_register_callback(self, PANDA_CB_BEFORE_STORE, pcb);
     pcb.after_store = after_store;
     panda_register_callback(self, PANDA_CB_AFTER_STORE, pcb);
+
+/*    pcb.insn_exec = insn_exec;
+    panda_register_callback(self, PANDA_CB_INSN_EXEC, pcb);*/
 
     return true;
 }
