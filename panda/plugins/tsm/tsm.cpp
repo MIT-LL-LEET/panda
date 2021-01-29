@@ -804,7 +804,7 @@ void taint_change (Addr addr, uint64_t size) {
 
 // this will be called semantically just after a store, meaning after emulation 
 // of the store and any taint prop
-void after_store(CPUState *cpu, uint64_t vaddr, uint64_t data, size_t size, bool isSigned) {    
+void after_store(CPUState *cpu, uint64_t vaddr, uint64_t data, size_t size, bool isSigned, enum panda_gp_reg_enum target_reg) {
 
     if (bail_early(cpu)) return;
 
@@ -828,7 +828,7 @@ void after_store(CPUState *cpu, uint64_t vaddr, uint64_t data, size_t size, bool
 
 // NB: Ultimately we want to use a callback registered after load that has access to reg into which load went.
 /*
-void after_load(CPUState *cpu, uint64_t addr, uint64_t data, size_t size, bool isSigned, uint32_t reg_num) {
+void after_load(CPUState *cpu, uint64_t addr, uint64_t data, size_t size, bool isSigned, uint32_t reg_num, enum panda_gp_reg_enum target_reg) {
     if (size == 8 && ptrs.count(data)) {
         cout << "data=" << hex << data << " was previously labeled and just loaded\n";
     }

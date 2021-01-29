@@ -64,6 +64,7 @@
 #include "panda/helper_runtime.h"
 extern "C" {
 #include "panda/callbacks/cb-support.h"
+#include "panda/tcg-mmu-helpers.h"
 }
 
 #if defined(CONFIG_SOFTMMU)
@@ -816,6 +817,7 @@ inline void TCGLLVMContextPrivate::generatePandaMMULoadCallback(const TCGArg *ar
     oi = *args++;
     opc = get_memop(oi);
     bool isSigned = !!(opc & MO_SIGN);
+    int32_t target_reg = (int32_t)*args++;
 
     /*
         TODO: We should determine a way to deal with this to correctly
@@ -851,7 +853,7 @@ inline void TCGLLVMContextPrivate::generatePandaMMULoadCallback(const TCGArg *ar
     if (TCG_TARGET_REG_BITS == 32)
     {
         std::vector<llvm::Value*> argValues;
-        argValues.reserve(8);
+        argValues.reserve(9);
 
         argValues.push_back(addrlo);
         argValues.push_back(addrhi);
@@ -861,10 +863,11 @@ inline void TCGLLVMContextPrivate::generatePandaMMULoadCallback(const TCGArg *ar
         argValues.push_back(llvm::ConstantInt::get(llvm::IntegerType::get(m_context, sizeof(int) * CHAR_BIT), isSigned, false));
         argValues.push_back(llvm::ConstantInt::get(llvm::IntegerType::get(m_context, sizeof(int) * CHAR_BIT), isPre, false));
         argValues.push_back(getEnv());
+        argValues.push_back(llvm::ConstantInt::get(llvm::IntegerType::get(m_context, sizeof(int32_t)* CHAR_BIT), target_reg, false));
 
         std::vector<llvm::Type*> argTypes;
-        argTypes.reserve(8);
-        for (int i = 0; i < 8; ++i)
+        argTypes.reserve(9);
+        for (int i = 0; i < 9; ++i)
             argTypes.push_back(argValues[i]->getType());
 
         llvm::FunctionType* helperFunctionTy = FunctionType::get(llvm::Type::getVoidTy(m_context), argTypes, false);
@@ -885,7 +888,7 @@ inline void TCGLLVMContextPrivate::generatePandaMMULoadCallback(const TCGArg *ar
     else
     {
         std::vector<llvm::Value*> argValues;
-        argValues.reserve(6);
+        argValues.reserve(7);
 
         argValues.push_back(addrlo);
         argValues.push_back(datalo);
@@ -893,10 +896,11 @@ inline void TCGLLVMContextPrivate::generatePandaMMULoadCallback(const TCGArg *ar
         argValues.push_back(llvm::ConstantInt::get(llvm::IntegerType::get(m_context, sizeof(int) * CHAR_BIT), isSigned, false));
         argValues.push_back(llvm::ConstantInt::get(llvm::IntegerType::get(m_context, sizeof(int) * CHAR_BIT), isPre, false));
         argValues.push_back(getEnv());
+        argValues.push_back(llvm::ConstantInt::get(llvm::IntegerType::get(m_context, sizeof(int32_t)* CHAR_BIT), target_reg, false));
 
         std::vector<llvm::Type*> argTypes;
-        argTypes.reserve(6);
-        for (int i = 0; i < 6; ++i)
+        argTypes.reserve(7);
+        for (int i = 0; i < 7; ++i)
             argTypes.push_back(argValues[i]->getType());
 
         FunctionType* helperFunctionTy = FunctionType::get(llvm::Type::getVoidTy(m_context), argTypes, false);
@@ -932,6 +936,7 @@ inline void TCGLLVMContextPrivate::generatePandaMMUStoreCallback(const TCGArg *a
     oi = *args++;
     opc = get_memop(oi);
     bool isSigned = !!(opc & MO_SIGN);
+    int32_t target_reg = (int32_t)*args++;
 
     /*
         TODO: We should determine a way to deal with this to correctly
@@ -968,7 +973,7 @@ inline void TCGLLVMContextPrivate::generatePandaMMUStoreCallback(const TCGArg *a
     if (TCG_TARGET_REG_BITS == 32)
     {
         std::vector<llvm::Value*> argValues;
-        argValues.reserve(8);
+        argValues.reserve(9);
 
         argValues.push_back(addrlo);
         argValues.push_back(addrhi);
@@ -978,10 +983,11 @@ inline void TCGLLVMContextPrivate::generatePandaMMUStoreCallback(const TCGArg *a
         argValues.push_back(llvm::ConstantInt::get(llvm::IntegerType::get(m_context, sizeof(int) * CHAR_BIT), isSigned, false));
         argValues.push_back(llvm::ConstantInt::get(llvm::IntegerType::get(m_context, sizeof(int) * CHAR_BIT), isPre, false));
         argValues.push_back(getEnv());
+        argValues.push_back(llvm::ConstantInt::get(llvm::IntegerType::get(m_context, sizeof(int32_t)* CHAR_BIT), target_reg, false));
 
         std::vector<llvm::Type*> argTypes;
-        argTypes.reserve(8);
-        for (int i = 0; i < 8; ++i)
+        argTypes.reserve(9);
+        for (int i = 0; i < 9; ++i)
             argTypes.push_back(argValues[i]->getType());
 
         llvm::FunctionType* helperFunctionTy = FunctionType::get(llvm::Type::getVoidTy(m_context), argTypes, false);
@@ -1002,7 +1008,7 @@ inline void TCGLLVMContextPrivate::generatePandaMMUStoreCallback(const TCGArg *a
     else
     {
         std::vector<llvm::Value*> argValues;
-        argValues.reserve(6);
+        argValues.reserve(7);
 
         argValues.push_back(addrlo);
         argValues.push_back(datalo);
@@ -1010,10 +1016,11 @@ inline void TCGLLVMContextPrivate::generatePandaMMUStoreCallback(const TCGArg *a
         argValues.push_back(llvm::ConstantInt::get(llvm::IntegerType::get(m_context, sizeof(int) * CHAR_BIT), isSigned, false));
         argValues.push_back(llvm::ConstantInt::get(llvm::IntegerType::get(m_context, sizeof(int) * CHAR_BIT), isPre, false));
         argValues.push_back(getEnv());
+        argValues.push_back(llvm::ConstantInt::get(llvm::IntegerType::get(m_context, sizeof(int32_t)* CHAR_BIT), target_reg, false));
 
         std::vector<llvm::Type*> argTypes;
-        argTypes.reserve(6);
-        for (int i = 0; i < 6; ++i)
+        argTypes.reserve(7);
+        for (int i = 0; i < 7; ++i)
             argTypes.push_back(argValues[i]->getType());
 
         FunctionType* helperFunctionTy = FunctionType::get(llvm::Type::getVoidTy(m_context), argTypes, false);
