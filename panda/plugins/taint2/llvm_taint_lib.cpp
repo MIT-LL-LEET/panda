@@ -230,6 +230,11 @@ bool PandaTaintFunctionPass::doInitialization(Module &M) {
     PTV->pointerF = TaintOpsFunction("taint_pointer",
         (void *) &taint_pointer, argTys, PTV->voidT, false, ES, symbols);
 
+    argTys = { PTV->int64T, PTV->int64T, PTV->int64T };
+
+    PTV->pointerTaintCheck = TaintOpsFunction("taint_pointer_check",
+        (void *) &taint_pointer_check, argTys, PTV->voidT, false, ES, symbols);
+
     argTys = { PTV->shadP, PTV->int64T, PTV->int64T, PTV->int64T,
         PTV->int64T, PTV->int64T, PTV->int64T, PTV->int64T };
 
@@ -749,6 +754,17 @@ void PandaTaintVisitor::insertTaintPointer(Instruction &I,
     insertCallAfter(*popCI, pointerF, args);
 
     inlineCall(popCI);
+}
+
+
+void PandaTaintVisitor::insertTaintPointerCheck(Instruction &I,
+        Value *ptr, Value *val, bool is_store) {    
+    vector<Value *> args{
+        constSlot(ptr), 
+        const_uint64(getValueSize(ptr)),
+        const_uint64(is_store)
+    };
+    insertCall(I, pointerTaintCheck, args, false, true);
 }
 
 
@@ -1614,6 +1630,9 @@ void PandaTaintVisitor::visitCallInst(CallInst &I) {
             } else {
                 insertTaintCopy(I, llvConst, &I, memConst, NULL, getValueSize(&I));
             }
+            if (!isa<Constant>(ptr)) {
+                insertTaintPointerCheck(I, ptr, &I, false);
+            }
             return;
         } else if (stFuncs.count(calledName) > 0) {
             Value *ptr = I.getArgOperand(1);
@@ -1624,6 +1643,9 @@ void PandaTaintVisitor::visitCallInst(CallInst &I) {
                 insertTaintDelete(I, memConst, NULL, const_uint64(getValueSize(val)));
             } else {
                 insertTaintCopy(I, memConst, NULL, llvConst, val, getValueSize(val));
+            }
+            if (!isa<Constant>(ptr)) {
+                insertTaintPointerCheck(I, ptr, &I, true);
             }
             return;
 #ifdef TARGET_I386

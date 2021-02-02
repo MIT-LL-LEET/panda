@@ -166,6 +166,7 @@ private:
         Value *dest, Constant *shad_src, Value *src, uint64_t size);
     void insertTaintPointer(Instruction &I, Value *ptr, Value *val,
         bool is_store);
+    void insertTaintPointerCheck(Instruction &I, Value *ptr, Value *val, bool is_store);
     void insertTaintMix(Instruction &I, Value *src);
     void insertTaintMix(Instruction &I, Value *dest, Value *src);
     void insertTaintCompute(Instruction &I,
@@ -192,6 +193,7 @@ public:
     TaintOpsFunction breadcrumbF;
     TaintOpsFunction mixF;
     TaintOpsFunction pointerF;
+    TaintOpsFunction pointerTaintCheck;
     TaintOpsFunction mix_computeF;
     TaintOpsFunction parallel_computeF;
     TaintOpsFunction mul_computeF;
