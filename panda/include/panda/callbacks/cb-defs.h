@@ -20,6 +20,8 @@ PANDAENDCOMMENT */
 extern "C" {
 #endif
 
+#include "panda/tcg-mmu-callbacks-regfind.h"
+
 // BEGIN_PYPANDA_NEEDS_THIS -- do not delete this comment bc pypanda
 // api autogen needs it.  And don't put any compiler directives
 // between this and END_PYPANDA_NEEDS_THIS except includes of other
@@ -1004,10 +1006,10 @@ typedef union panda_cb {
 
     int32_t (*before_handle_interrupt)(CPUState *cpu, int32_t interrupt_request);
 
-    void (*before_load)(CPUState* env, uint64_t addr, uint64_t data, size_t width, bool isSigned);
-    void (*after_load)(CPUState* env, uint64_t addr, uint64_t data, size_t width, bool isSigned);
-    void (*before_store)(CPUState* env, uint64_t addr, uint64_t data, size_t width, bool isSigned);
-    void (*after_store)(CPUState* env, uint64_t addr, uint64_t data, size_t width, bool isSigned);
+    void (*before_load)(CPUState* env, uint64_t addr, uint64_t data, size_t width, bool isSigned, enum panda_gp_reg_enum target_reg);
+    void (*after_load)(CPUState* env, uint64_t addr, uint64_t data, size_t width, bool isSigned, enum panda_gp_reg_enum target_reg);
+    void (*before_store)(CPUState* env, uint64_t addr, uint64_t data, size_t width, bool isSigned, enum panda_gp_reg_enum target_reg);
+    void (*after_store)(CPUState* env, uint64_t addr, uint64_t data, size_t width, bool isSigned, enum panda_gp_reg_enum target_reg);
 
     void (*cbaddr)(void);
 } panda_cb;

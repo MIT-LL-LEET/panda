@@ -213,18 +213,18 @@ DEF(            qemu_st_i64,           0, TLADDR_ARGS + DATA64_ARGS,     1, TCG_
 */
 /*
 	Versions that have input arguments euqal to:
-		before_*: the original inputs
+		before_*: the original inputs + output target reg identifier (-1 on unknown)
 		after_*: inputs _and_ outputs in the normal op (as inputs to this)
 */
-DEF(panda_before_mmu_ld_i32,           0,               TLADDR_ARGS,     1, TCG_OPF_CALL_CLOBBER | TCG_OPF_SIDE_EFFECTS)
-DEF(panda_before_mmu_st_i32,           0,           TLADDR_ARGS + 1,     1, TCG_OPF_CALL_CLOBBER | TCG_OPF_SIDE_EFFECTS)
-DEF(panda_before_mmu_ld_i64,           0,               TLADDR_ARGS,     1, TCG_OPF_CALL_CLOBBER | TCG_OPF_SIDE_EFFECTS | TCG_OPF_64BIT)
-DEF(panda_before_mmu_st_i64,           0, TLADDR_ARGS + DATA64_ARGS,     1, TCG_OPF_CALL_CLOBBER | TCG_OPF_SIDE_EFFECTS | TCG_OPF_64BIT)
+DEF(panda_before_mmu_ld_i32,           0,               TLADDR_ARGS,     2, TCG_OPF_CALL_CLOBBER | TCG_OPF_SIDE_EFFECTS)
+DEF(panda_before_mmu_st_i32,           0,           TLADDR_ARGS + 1,     2, TCG_OPF_CALL_CLOBBER | TCG_OPF_SIDE_EFFECTS)
+DEF(panda_before_mmu_ld_i64,           0,               TLADDR_ARGS,     2, TCG_OPF_CALL_CLOBBER | TCG_OPF_SIDE_EFFECTS | TCG_OPF_64BIT)
+DEF(panda_before_mmu_st_i64,           0, TLADDR_ARGS + DATA64_ARGS,     2, TCG_OPF_CALL_CLOBBER | TCG_OPF_SIDE_EFFECTS | TCG_OPF_64BIT)
 
-DEF( panda_after_mmu_ld_i32,           0,           TLADDR_ARGS + 1,     1, TCG_OPF_CALL_CLOBBER | TCG_OPF_SIDE_EFFECTS)
-DEF( panda_after_mmu_st_i32,           0,           TLADDR_ARGS + 1,     1, TCG_OPF_CALL_CLOBBER | TCG_OPF_SIDE_EFFECTS)
-DEF( panda_after_mmu_ld_i64,           0, TLADDR_ARGS + DATA64_ARGS,     1, TCG_OPF_CALL_CLOBBER | TCG_OPF_SIDE_EFFECTS | TCG_OPF_64BIT)
-DEF( panda_after_mmu_st_i64,           0, TLADDR_ARGS + DATA64_ARGS,     1, TCG_OPF_CALL_CLOBBER | TCG_OPF_SIDE_EFFECTS | TCG_OPF_64BIT)
+DEF( panda_after_mmu_ld_i32,           0,           TLADDR_ARGS + 1,     2, TCG_OPF_CALL_CLOBBER | TCG_OPF_SIDE_EFFECTS)
+DEF( panda_after_mmu_st_i32,           0,           TLADDR_ARGS + 1,     2, TCG_OPF_CALL_CLOBBER | TCG_OPF_SIDE_EFFECTS)
+DEF( panda_after_mmu_ld_i64,           0, TLADDR_ARGS + DATA64_ARGS,     2, TCG_OPF_CALL_CLOBBER | TCG_OPF_SIDE_EFFECTS | TCG_OPF_64BIT)
+DEF( panda_after_mmu_st_i64,           0, TLADDR_ARGS + DATA64_ARGS,     2, TCG_OPF_CALL_CLOBBER | TCG_OPF_SIDE_EFFECTS | TCG_OPF_64BIT)
 
 #undef TLADDR_ARGS
 #undef DATA64_ARGS

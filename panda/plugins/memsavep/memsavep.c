@@ -33,7 +33,7 @@ static uint64_t pmem_len = 0;
 bool init_plugin(void *);
 void uninit_plugin(void *);
 void before_block_exec(CPUState *env, TranslationBlock *tb);
-void dump_memory(void);
+void dump_memory(CPUState* cpu);
 
 static const uint8_t _zero_block[1024] = {0};
 static void actually_dump_physical_memory(FILE* out, size_t len)
@@ -58,7 +58,7 @@ static void actually_dump_physical_memory(FILE* out, size_t len)
     }
 }
 
-void dump_memory(void){
+void dump_memory(CPUState* cpu){
     FILE* out = fopen(filename, "wb");
     actually_dump_physical_memory(out, pmem_len);
     fclose(out);
@@ -77,6 +77,8 @@ void dump_memory(void){
     }
     dump_done = true;
 
+    cpu_dump_state(cpu, stderr, fprintf, CPU_DUMP_FPU);
+
     if(should_close_after_dump)
         panda_replay_end();
 }
@@ -86,10 +88,10 @@ void before_block_exec(CPUState *env, TranslationBlock *tb) {
 
     if (instr_count && rr_get_guest_instr_count() > instr_count) {
         printf("memsavep: Instruction count reached, saving memory to %s.\n", filename);
-        dump_memory();
+        dump_memory(env);
     } else if (rr_get_percentage() > percent) {
         printf("memsavep: Replay percentage reached, saving memory to %s.\n", filename);
-        dump_memory();
+        dump_memory(env);
     }
 
     return;
