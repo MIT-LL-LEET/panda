@@ -161,12 +161,12 @@ static inline RR_prog_point rr_prog_point(void) {
     return ret;
 }
 
-static inline void qemu_log_rr(target_ulong pc) {
+static inline void qemu_log_rr(target_ulong pc, uint16_t size /* in bytes */) {
     if (qemu_loglevel_mask(CPU_LOG_RR)) {
         RR_prog_point pp = rr_prog_point();
         qemu_log_mask(CPU_LOG_RR,
-                "Prog point: 0x" TARGET_FMT_lx " {guest_instr_count=%llu}\n",
-                pc, (unsigned long long)pp.guest_instr_count);
+                "Prog point: 0x" TARGET_FMT_lx ",%u {guest_instr_count=%llu}\n",
+                pc, size, (unsigned long long)pp.guest_instr_count);
     }
 }
 

@@ -843,7 +843,7 @@ int cpu_exec(CPUState *cpu)
                 cpu->temp_rr_bp_instr = 0;
             }
 
-            qemu_log_rr(tb->pc);
+            qemu_log_rr(tb->pc, tb->size);
 
 #ifdef CONFIG_SOFTMMU
             uint64_t until_interrupt = rr_num_instr_before_next_interrupt();
