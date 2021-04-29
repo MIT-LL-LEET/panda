@@ -59,6 +59,15 @@ Addr make_greg(uint64_t r, uint16_t off) {
     return a;
 }
 
+Addr make_gspec(uint64_t r, uint16_t off) {
+    Addr a;
+    a.typ = GSPEC;
+    a.val.gr = r;
+    a.off = off;
+    a.flag = (AddrFlag) 0;
+    return a;
+}
+
 extern bool debug_taint;
 target_ulong debug_asid = 0;
 
@@ -169,9 +178,9 @@ void taint2_label_io(uint64_t ia, uint32_t l) {
 
 void taint2_label(Addr a, uint32_t l) {
     if (a.typ == LADDR)
-        taint_log("LABEL: Laddr[%lx] offset=%d (%d)\n", a.val.la, offset, l);
+        taint_log("LABEL: Laddr[%lx] offset=%d (%d)\n", a.val.la, a.off, l);
     if (a.typ == GREG)
-        taint_log("LABEL: Greg[%lx] offset=%d (%d)\n", a.val.gr, offset, l);
+        taint_log("LABEL: Greg[%lx] offset=%d (%d)\n", a.val.gr, a.off, l);
     tp_label(a, l);
 }
 
@@ -632,6 +641,10 @@ Addr create_laddr(uint64_t a, uint64_t off) {
 
 Addr create_greg(uint64_t r, uint16_t off) {
     return make_greg(r, off);
+}
+
+Addr create_gspec(uint64_t r, uint16_t off) {
+    return make_gspec(r, off);
 }
 
 

@@ -20,6 +20,7 @@ Addr create_iaddr(uint64_t a);
 Addr create_maddr(uint64_t a);
 Addr create_laddr(uint64_t a, uint64_t o);
 Addr create_greg(uint64_t r, uint16_t off);
+Addr create_gspec(uint64_t r, uint16_t off);
 
 void taint2_enable_taint(void);
 void taint2_enable_tainted_pointer(void);

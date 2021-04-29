@@ -7,6 +7,7 @@ extern "C" {
 #include <sys/resource.h>
 }
 
+#include "stdlib.h"
 #include "panda/plugin.h"
 #include "taint2/taint2.h"
 #include "taint2/addr_fns.h"
@@ -78,74 +79,230 @@ string addr_str(Addr a) {
 }
 
 
-string r_names[15] = { 
-    "EAX", "ECX", "EDX", "EBX", "ESP", "EBP", "ESI", "EDI", "EIP", "XMM", "YMM", "ZMM", "ST", "CR", "DR"};
+int get_reg_addr(enum panda_gp_reg_enum target_reg, Addr &a) {
 
-// note: R_EAX...R_EDI are defined in cpu.h: 0 .. 7
-// which is why these are negative.  Also not sure how to taint them! 
-#define R_EIP (-1)
-#define R_XMM (-2)
-#define R_YMM (-3)
-#define R_ZMM (-4)
-#define R_ST (-5)
-#define R_CR (-6)
-#define R_DR (-7)
-#define R_UNK (-1000)
+    uint64_t xmm_start = (uint64_t)(&(((CPUArchState *)0)->xmm_regs));
 
+    switch (target_reg) {
 
-int get_r_num(enum panda_gp_reg_enum target_reg) {
-    
-    if (target_reg >= PANDA_GP_REG_RAX && target_reg <= PANDA_GP_REG_AL) {
-        return R_EAX;
-    }
-    else if (target_reg >= PANDA_GP_REG_RBX && target_reg <= PANDA_GP_REG_BL) {
-        return R_EBX;
-    }
-    else if (target_reg >= PANDA_GP_REG_RCX && target_reg <= PANDA_GP_REG_CL) {
-        return R_ECX;
-    }
-    else if (target_reg >= PANDA_GP_REG_RDX && target_reg <= PANDA_GP_REG_DL) {
-        return R_EDX;
-    }
-    else if (target_reg >= PANDA_GP_REG_RSP && target_reg <= PANDA_GP_REG_SP) {
-        return R_ESP;
-    }
-    else if (target_reg >= PANDA_GP_REG_RBP && target_reg <= PANDA_GP_REG_BP) {
-        return R_EBP;
-    }
-    else if (target_reg >= PANDA_GP_REG_RSI && target_reg <= PANDA_GP_REG_SI) {
-        return R_ESI;
-    }
-    else if (target_reg >= PANDA_GP_REG_RDI && target_reg <= PANDA_GP_REG_DI) {
-        return R_EDI;
-    }
-    else if (target_reg >= PANDA_GP_REG_R8 && target_reg <= PANDA_GP_REG_R15) {
-        return target_reg - PANDA_GP_REG_R8 + R_EDI + 1;
-    }
-    else if (target_reg >= PANDA_GP_REG_RIP && target_reg <= PANDA_GP_REG_IP) {
-        return R_EIP;
-    }
-    else if (target_reg >= PANDA_GP_REG_XMM0 && target_reg <= PANDA_GP_REG_XMM31) {
-        return R_XMM;
-    }
-    else if (target_reg >= PANDA_GP_REG_YMM0 && target_reg <= PANDA_GP_REG_YMM31) {
-        return R_YMM;
-    }
-    else if (target_reg >= PANDA_GP_REG_ZMM0 && target_reg <= PANDA_GP_REG_ZMM31) {
-        return R_ZMM;
-    }
-    else if (target_reg >= PANDA_GP_REG_ST0 && target_reg <= PANDA_GP_REG_ST7) {
-        return R_ST;
-    }
-    else if (target_reg >= PANDA_GP_REG_CR0 && target_reg <= PANDA_GP_REG_CR4) {
-        return R_CR;
-    }
-    else if (target_reg >= PANDA_GP_REG_DR0 && target_reg <= PANDA_GP_REG_DR7) {
-        return R_DR;
-    }
-    return R_UNK;
+    // R_EAX = 0
+    case PANDA_GP_REG_RAX:
+    case PANDA_GP_REG_EAX:
+    case PANDA_GP_REG_AX:
+    case PANDA_GP_REG_AL:
+        a = create_greg(0,0);
+        break;
 
+    case PANDA_GP_REG_AH:
+        a = create_greg(0,0);
+        break;
+
+    // R_ECX = 1
+    case PANDA_GP_REG_RCX:
+    case PANDA_GP_REG_ECX:
+    case PANDA_GP_REG_CX:
+    case PANDA_GP_REG_CL:
+        a = create_greg(1,0);
+        break;
+
+    case PANDA_GP_REG_CH:
+        a = create_greg(1,1);
+        break;
+
+    // R_EDX = 2
+    case PANDA_GP_REG_RDX:
+    case PANDA_GP_REG_EDX:
+    case PANDA_GP_REG_DX:
+    case PANDA_GP_REG_DL:
+        a = create_greg(2,0);
+        break;
+
+    case PANDA_GP_REG_DH:
+        a = create_greg(2,1);
+        break;
+
+    // R_EBX = 3
+    case PANDA_GP_REG_RBX:
+    case PANDA_GP_REG_EBX:
+    case PANDA_GP_REG_BX: 
+    case PANDA_GP_REG_BL:
+        a = create_greg(3,0);
+        break;
+
+    case PANDA_GP_REG_BH:
+        a = create_greg(3,1);
+        break;
+
+    // R_ESP = 4
+    case PANDA_GP_REG_RSP:
+    case PANDA_GP_REG_ESP:
+    case PANDA_GP_REG_SP:
+        a = create_greg(4,0);
+        break;
+
+    // R_EBP = 5
+    case PANDA_GP_REG_RBP:
+    case PANDA_GP_REG_EBP:
+    case PANDA_GP_REG_BP:
+        a = create_greg(5,0);
+        break;
+
+    // R_ESI = 6
+    case PANDA_GP_REG_RSI:
+    case PANDA_GP_REG_ESI:
+    case PANDA_GP_REG_SI:
+        a = create_greg(6,0);
+        break;
+
+    // R_EDI = 7
+    case PANDA_GP_REG_RDI:
+    case PANDA_GP_REG_EDI:
+    case PANDA_GP_REG_DI:
+        a = create_greg(7,0);
+        break;
+
+    case PANDA_GP_REG_R8:
+    case PANDA_GP_REG_R9:
+    case PANDA_GP_REG_R10:
+    case PANDA_GP_REG_R11:
+    case PANDA_GP_REG_R12:
+    case PANDA_GP_REG_R13:
+    case PANDA_GP_REG_R14:
+    case PANDA_GP_REG_R15:
+        a = create_greg(target_reg - PANDA_GP_REG_R8, 0);
+        break;
+
+    case PANDA_GP_REG_XMM0:
+    case PANDA_GP_REG_XMM1:
+    case PANDA_GP_REG_XMM2:
+    case PANDA_GP_REG_XMM3:
+    case PANDA_GP_REG_XMM4:
+    case PANDA_GP_REG_XMM5:
+    case PANDA_GP_REG_XMM6:
+    case PANDA_GP_REG_XMM7:
+    case PANDA_GP_REG_XMM8:
+    case PANDA_GP_REG_XMM9:
+    case PANDA_GP_REG_XMM10:
+    case PANDA_GP_REG_XMM11:
+    case PANDA_GP_REG_XMM12:
+    case PANDA_GP_REG_XMM13:
+    case PANDA_GP_REG_XMM14:
+    case PANDA_GP_REG_XMM15:
+    case PANDA_GP_REG_XMM16:
+    case PANDA_GP_REG_XMM17:
+    case PANDA_GP_REG_XMM18:
+    case PANDA_GP_REG_XMM19:
+    case PANDA_GP_REG_XMM20:
+    case PANDA_GP_REG_XMM21:
+    case PANDA_GP_REG_XMM22:
+    case PANDA_GP_REG_XMM23:
+    case PANDA_GP_REG_XMM24:
+    case PANDA_GP_REG_XMM25:
+    case PANDA_GP_REG_XMM26:
+    case PANDA_GP_REG_XMM27:
+    case PANDA_GP_REG_XMM28:
+    case PANDA_GP_REG_XMM29:
+    case PANDA_GP_REG_XMM30:
+    case PANDA_GP_REG_XMM31:
+    {
+        int ind = (target_reg - PANDA_GP_REG_XMM0);
+        a = create_gspec(xmm_start + ind * 64, 0);
+        break;
+    }
+    case PANDA_GP_REG_YMM0:
+    case PANDA_GP_REG_YMM1:
+    case PANDA_GP_REG_YMM2:
+    case PANDA_GP_REG_YMM3:
+    case PANDA_GP_REG_YMM4:
+    case PANDA_GP_REG_YMM5:
+    case PANDA_GP_REG_YMM6:
+    case PANDA_GP_REG_YMM7:
+    case PANDA_GP_REG_YMM8:
+    case PANDA_GP_REG_YMM9:
+    case PANDA_GP_REG_YMM10:
+    case PANDA_GP_REG_YMM11:
+    case PANDA_GP_REG_YMM12:
+    case PANDA_GP_REG_YMM13:
+    case PANDA_GP_REG_YMM14:
+    case PANDA_GP_REG_YMM15:
+    case PANDA_GP_REG_YMM16:
+    case PANDA_GP_REG_YMM17:
+    case PANDA_GP_REG_YMM18:
+    case PANDA_GP_REG_YMM19:
+    case PANDA_GP_REG_YMM20:
+    case PANDA_GP_REG_YMM21:
+    case PANDA_GP_REG_YMM22:
+    case PANDA_GP_REG_YMM23:
+    case PANDA_GP_REG_YMM24:
+    case PANDA_GP_REG_YMM25:
+    case PANDA_GP_REG_YMM26:
+    case PANDA_GP_REG_YMM27:
+    case PANDA_GP_REG_YMM28:
+    case PANDA_GP_REG_YMM29:
+    case PANDA_GP_REG_YMM30:
+    case PANDA_GP_REG_YMM31:
+    {
+        int ind = (target_reg - PANDA_GP_REG_YMM0);
+        a = create_gspec(xmm_start + ind * 64, 0);
+        break;
+    }
+    case PANDA_GP_REG_ZMM0:
+    case PANDA_GP_REG_ZMM1:
+    case PANDA_GP_REG_ZMM2:
+    case PANDA_GP_REG_ZMM3:
+    case PANDA_GP_REG_ZMM4:
+    case PANDA_GP_REG_ZMM5:
+    case PANDA_GP_REG_ZMM6:
+    case PANDA_GP_REG_ZMM7:
+    case PANDA_GP_REG_ZMM8:
+    case PANDA_GP_REG_ZMM9:
+    case PANDA_GP_REG_ZMM10:
+    case PANDA_GP_REG_ZMM11:
+    case PANDA_GP_REG_ZMM12:
+    case PANDA_GP_REG_ZMM13:
+    case PANDA_GP_REG_ZMM14:
+    case PANDA_GP_REG_ZMM15:
+    case PANDA_GP_REG_ZMM16:
+    case PANDA_GP_REG_ZMM17:
+    case PANDA_GP_REG_ZMM18:
+    case PANDA_GP_REG_ZMM19:
+    case PANDA_GP_REG_ZMM20:
+    case PANDA_GP_REG_ZMM21:
+    case PANDA_GP_REG_ZMM22:
+    case PANDA_GP_REG_ZMM23:
+    case PANDA_GP_REG_ZMM24:
+    case PANDA_GP_REG_ZMM25:
+    case PANDA_GP_REG_ZMM26:
+    case PANDA_GP_REG_ZMM27:
+    case PANDA_GP_REG_ZMM28:
+    case PANDA_GP_REG_ZMM29:
+    case PANDA_GP_REG_ZMM30:
+    case PANDA_GP_REG_ZMM31:
+    {
+        int ind = (target_reg - PANDA_GP_REG_ZMM0);
+        a = create_gspec(xmm_start + ind * 64, 0);
+        break;
+    }
+    default:
+        return -1;
+    }
+
+    return 0;
 }
+
+
+
+
+const char* target_reg_name(enum panda_gp_reg_enum target_reg)
+{
+    if (target_reg == PANDA_GP_REG_INVALID)
+        return "<Unknown>";
+    if (target_reg < 0 || target_reg >= PANDA_GP_REG_NAMES_COUNT)
+        return "<Illegal>";
+    return PANDA_GP_REG_NAMES[target_reg];
+}
+
+
 
 struct Thread {
     target_ptr_t pid;
@@ -333,6 +490,10 @@ Addr get_addr_with_offset(Addr a, uint32_t i) {
         assert (a.off == 0);
         b.val.ma += i;
         break;
+    case GSPEC:
+        assert (a.off == 0);
+        b.val.gs += i;
+        break;
     case LADDR:
     case GREG:
         // bc this can be nonzero ugh.
@@ -378,7 +539,8 @@ int collect_labels(TaintLabel l, void *stuff) {
 uint32_t get_ldst_labels(CPUState *cpu, LabelType label_type, 
                          Addr addr, size_t size) {
     all_labels.clear();
-    // collect load labels for a store and store labels for a load
+    // note, if this is called on a store sink, then we'll only collect load labels
+    // else if it is called on a load sink, we'll only collect store labels
     collect_labels_type = label_type;
     // how many bytes on the range are tainted?
     uint32_t num_tainted = 0;
@@ -467,18 +629,11 @@ void make_psink(bool isStore, OsiProc *process, OsiThread *thread,
 
   pc, addr, size, and data are all for sink
 
-  NOTE: uses all_labels which is assume previously to have been
-  populated by a call to get_ldst_labels
-
 */
 void log_copy_flows(bool atStore, CPUState *cpu, OsiProc *process, OsiThread *thread, 
                     target_ptr_t pc, size_t size, uint64_t data, TaintLabel label) {
         
     SourceInfo source = label2source[label];
-
-    // flow is from load -> store or store -> load
-    // if one is store the other should be load, and vice versa
-    assert (source.isStore != atStore);
 
     if (debug) {
         cout << " log_copy_flows: flow observed from "
@@ -517,8 +672,6 @@ void log_copy_flows(bool atStore, CPUState *cpu, OsiProc *process, OsiThread *th
 void log_compute_flow(bool atStore, CPUState *cpu, SourceInfo &source, OsiProc *process, OsiThread *thread,
                       target_ptr_t pc, size_t size, uint64_t data, uint32_t offset,
                       uint32_t card, uint8_t cb, uint32_t tcn) {
-
-    assert (source.isStore != atStore);
 
     if (debug) {
         cout << " log_compute_flows: flow observed from "
@@ -587,96 +740,61 @@ bool its_a_copy(Addr addr, size_t size) {
 void log_flows(bool atStore, CPUState *cpu, OsiProc *process, OsiThread *thread, 
                target_ptr_t pc, Addr sink, size_t size, uint64_t data) { 
 
-    // NB: this populates 'all_labels'
-    // with complete set of labels on any byte pn the sink extent
+    // NB: this populates 'all_labels' with set of labels on sink that could be a src
     uint32_t num_tainted = get_ldst_labels(cpu, (atStore ? LoadLabel : StoreLabel), sink, size);
 
+    if (debug) 
+        cout << "log_flows: " << num_tainted << " bytes tainted on sink\n";
+
     // sink is not tainted -- bail
-    if (num_tainted == 0) return;
-
-    bool copied_data = its_a_copy(sink, size);
-
-    // grab a label from the set -- if its card=1 this is the only element
-    auto label_iter = all_labels.begin();
-    TaintLabel one_label = *label_iter;
-
-    if (!atStore) {
-        // store -> load flow
-        assert (sink.typ == MADDR);
-        // if its not a copy we have a problem so all of this is debug
-        if (!copied_data) {
-            debug=true;
-            // run again to get debug printouts
-            copied_data = its_a_copy(sink, size);
-            cout << "log_flows: @ load but data is not a copy?\n";
-            for (int i=0; i<size; i++) {
-                cout << "i=" << i;
-                Addr b = get_addr_with_offset(sink, i);
-                uint32_t c = taint2_query(b);
-                if (c>0) {
-                    cout << " is tainted. tcn=" << (taint2_query_tcn(b)) << " card=" << c << "\n";
-                    all_labels.clear();
-                    taint2_labelset_iter(b, collect_labels, NULL);
-                    for (auto l : all_labels) {
-                        cout << "label="<< l << "\n";
-                        SourceInfo source = label2source[l];
-                        cout << source << "\n";
-                    }
-                }
-                else 
-                    cout << " not tainted.\n";
-            }
-        }        
-        fflush(stdout);
-        // it has to be a copy
-        assert (copied_data);
+    if (num_tainted == 0) 
+        return;    
+    
+    if (its_a_copy(sink, size)) {
+        // note: this relies on prior call to get_labels
+        auto label_iter = all_labels.begin();
+        TaintLabel one_label = *label_iter;
         log_copy_flows(atStore, cpu, process, thread, pc, size, data, one_label);            
     }
     else {
-        // load -> store flow
-        assert (sink.typ == LADDR || sink.typ == GREG);
-        // might be a compute?
-        if (copied_data) 
-            log_copy_flows(atStore, cpu, process, thread, pc, size, data, one_label);
-        else {
-            // looks like its a compute flow (load->store and not a copy)
-            if (log_compute_flows) {
-                // One compute flow per byte in sink
-                // collect tcn/cb/card since we have to log that stuff
-                for (int i=0; i<size; i++) {
-                    Addr b = get_addr_with_offset(sink, i);
-                    uint32_t card = taint2_query(b);
-                    if (card > 0) {
-                        // this byte has some taint. collect load labels just for this byte.
-                        all_labels.clear();
-                        collect_labels_type = LoadLabel;
-                        taint2_labelset_iter(b, collect_labels, NULL);
-                        // other features of the load->store flow for offset i 
-                        // number of 'reversible' bits
-                        uint8_t cb = taint2_query_cb_mask(b); 
-                        // taint compute number (depth of tree of computation from input (taint) to this byte)
-                        uint32_t tcn = taint2_query_tcn(b);    
-                        for (auto l : all_labels) {
-                            SourceInfo source = label2source[l];
-                            log_compute_flow(atStore, cpu, source, process, thread, pc, size, data, i, card, cb, tcn);
-                        }
+        if (log_compute_flows) {
+            // One compute flow per byte in sink
+            // collect tcn/cb/card since we have to log that stuff
+            for (int i=0; i<size; i++) {
+                Addr b = get_addr_with_offset(sink, i);
+                uint32_t card = taint2_query(b);
+                if (card > 0) {
+                    // this byte has some taint. collect load labels just for this byte.
+                    all_labels.clear();
+                    collect_labels_type = LoadLabel;
+                    taint2_labelset_iter(b, collect_labels, NULL);
+                    // other features of the load->store flow for offset i 
+                    // number of 'reversible' bits
+                    uint8_t cb = taint2_query_cb_mask(b); 
+                    // taint compute number (depth of tree of computation from input (taint) to this byte)
+                    uint32_t tcn = taint2_query_tcn(b);    
+                    for (auto l : all_labels) {
+                        SourceInfo source = label2source[l];
+                        log_compute_flow(atStore, cpu, source, process, thread, pc, size, data, i, card, cb, tcn);
                     }
                 }
-            }    
-        }
-    }
+            }
+        }    
+    }       
 }            
             
 
 
-
 // apply taint labels to this load or store source
+// label is applied to addr which can be register or memory 
+// size is the number of bytes to label, starting at addr
+// the label is unique to this source which is a combination of
+// thread/process, instr count, pc, etc 
 TaintLabel label_store_or_load(bool sourceIsStore, CPUState *cpu, 
                                OsiProc *process, OsiThread *othread, 
                                target_ptr_t pc, bool in_kernel, uint64_t instr, 
                                Addr addr, uint64_t vaddr, uint64_t data, 
                                size_t size, bool isSigned) {
-
     Thread thread;
     thread.pid = process->pid;
     thread.ppid = process->ppid;
@@ -687,7 +805,7 @@ TaintLabel label_store_or_load(bool sourceIsStore, CPUState *cpu,
     source.thread = thread;
     source.pc = pc;
     source.in_kernel = panda_in_kernel(cpu);
-    source.instr = rr_get_guest_instr_count();
+    source.instr = instr;
     source.value = data;
     source.size = size;
     source.isSigned = isSigned;
@@ -765,55 +883,6 @@ void log_map_update(OsiProc *process, OsiThread *thread, target_ptr_t pc, uint64
     
 
 
-void debug_labels(CPUState *cpu, LabelType lt, Addr addr, size_t size) {
-    cout << " (lt=" << (lt==LoadLabel ? "load" : "store") ;
-    uint32_t num_tainted = get_ldst_labels(cpu, lt, addr, size);
-//    cout << " num_tainted=" << num_tainted << "\n";
-    if (num_tainted == 0) 
-        cout << " -- no taint)";
-    else {
-        bool copied_data = its_a_copy(addr, size);
-        if (copied_data) 
-            cout << " -- copy taint)";
-        else 
-            cout << " -- compute taint)";
-    }    
-}
-
-
-void debug_compute(string label, CPUState *cpu, uint64_t vaddr, size_t size) {
-
-    vaddr = 0xffff88803d3ad83c;
-    for (int i=0; i<4; i++) {
-        cout << label << ": i=" << i << " vaddr=" << hex << vaddr + i << dec;;
-        pair p = get_maddr(cpu, true, vaddr + i);
-        if (p.first == false) 
-            cout << " can't get_maddr\n";
-        else {
-            Addr b = get_addr_with_offset(p.second, i);
-            uint32_t n = taint2_query(b);
-            if (n>0) {
-                cout << " -- tcn=" << taint2_query_tcn(b);
-                cout << " n=" << n;
-                all_labels.clear();                    
-                taint2_labelset_iter(b, collect_labels, NULL);
-                cout << " labels=[";
-                for (auto l : all_labels) {
-                    cout << " (l=" << l;
-                    SourceInfo source = label2source[l];
-                    cout << ",source=(" << source << ") ";
-                }
-                cout << "]\n";                                        
-            }
-            else {
-                cout << " -- untainted\n";
-            }
-        }
-    }
-    
-}
-
-
 // returns true iff current proc and thread are available.
 // also populates *currentp and othreadp
 tuple<bool,OsiProc*,OsiThread*> get_proc_thread(CPUState *cpu) {
@@ -832,17 +901,15 @@ tuple<bool,OsiProc*,OsiThread*> get_proc_thread(CPUState *cpu) {
 }
 
 
+
 // src_or_sink might be a reg or might be mem, depending on if this
-// is called from load or store and if before or after
+// is called from load (atStore=False) or store and if before or after
 void handle_ldst(bool atStore, bool isSink, CPUState *cpu, Addr src_or_sink, 
                  uint64_t vaddr, uint64_t data, size_t size_in_bits, 
-                 bool isSigned, enum panda_gp_reg_enum target_reg, int r_num) {
+                 bool isSigned, enum panda_gp_reg_enum target_reg) {
 
-    auto p = get_maddr(cpu, atStore, vaddr);
-    if (p.first && vaddr == 0xffff8880366b6a20) 
-        cout << "vaddr=" << hex << vaddr << " paddr=" << addr_str(p.second) << dec << "\n";
-
-
+    uint64_t instr = rr_get_guest_instr_count();
+ 
     // check if taint enabled 
     if (!taint2_enabled())
         return;
@@ -859,12 +926,12 @@ void handle_ldst(bool atStore, bool isSink, CPUState *cpu, Addr src_or_sink,
 
     if (debug) {
         cout << "handle_ldst --";
-        cout << " instr=" << rr_get_guest_instr_count(); 
+        cout << " instr=" << instr;
         cout << " pc=" << hex << cpu->panda_guest_pc << dec;
         cout << " atStore=" << atStore << " isSink=" << isSink; 
         cout << " vaddr=" << hex << vaddr << dec << " size=" << size_in_bytes;
-        cout << " target_reg=" << target_reg << " r_num=" << r_num;
-        cout << " " << ((r_num >= 0) ? r_names[r_num] : "??") << "\n";
+        cout << " target_reg=" << target_reg << " " << (target_reg_name(target_reg));
+        cout << "\n";
     }
 
     bool ok_to_handle = true;
@@ -898,8 +965,10 @@ void handle_ldst(bool atStore, bool isSink, CPUState *cpu, Addr src_or_sink,
     }
     
     if (atStore == isSink) {
-        // src_or_sink will be a reg.  But we may not actually have it so check
-        if (r_num <= 0) {
+        // src_or_sink will be a reg for these cases
+        // But we may not actually know the reg so check
+        if (target_reg == PANDA_GP_REG_IMMEDIATE 
+            || target_reg == PANDA_GP_REG_INVALID) {
             if (debug) cout << "handle_ldst: handling involves a register but"
                            "we dont have a reasonable one\n";
             ok_to_handle = false;
@@ -911,16 +980,15 @@ void handle_ldst(bool atStore, bool isSink, CPUState *cpu, Addr src_or_sink,
         if (debug)
             cout << "handle_ldst: checks passed and ok to handle.\n";
         if (isSink) {
-            log_flows(atStore, cpu, current, othread, panda_in_kernel(cpu), 
+            log_flows(atStore, cpu, current, othread, cpu->panda_guest_pc,
                       src_or_sink, size_in_bytes, data);
         }
         else {
             TaintLabel label
                 = label_store_or_load(atStore, cpu, current, othread, 
                                       cpu->panda_guest_pc, panda_in_kernel(cpu), 
-                                      rr_get_guest_instr_count(), 
-                                      src_or_sink, vaddr, data, size_in_bytes, 
-                                      isSigned);            
+                                      instr, src_or_sink, vaddr, data, 
+                                      size_in_bytes, isSigned);            
             if (log_map_updates && atStore) {
                 log_map_update(current, othread, cpu->panda_guest_pc, vaddr, 
                                size_in_bytes, label);
@@ -935,6 +1003,9 @@ void handle_ldst(bool atStore, bool isSink, CPUState *cpu, Addr src_or_sink,
                 cout << "handle_ldst: Can't handle sink.  Missing flow.\n";
         }
         else {
+#if 0
+// i think all of this is a bad idea.  just let the taint flow 
+           
             // can't handle this source -- must clear taint on source!
             if (debug) 
                 cout << "handle_ldst: Can't handle source. Deleting taint on source.\n";
@@ -947,6 +1018,7 @@ void handle_ldst(bool atStore, bool isSink, CPUState *cpu, Addr src_or_sink,
                     taint2_delete(a);                           
                 } 
             }
+#endif
         }    
     }
     
@@ -955,60 +1027,55 @@ void handle_ldst(bool atStore, bool isSink, CPUState *cpu, Addr src_or_sink,
 }
 
 
+
 // before a store, we'll check taint on the reg being stored and maybe log a ld->st flow
 // the reg is a flow sink
 void before_store(CPUState *cpu, uint64_t vaddr, uint64_t data, size_t size_in_bits, bool isSigned, enum panda_gp_reg_enum target_reg) {
-    if (vaddr == 0xffff8880366b6a20) printf ("SAW the vaddr\n");
-    int r_num = get_r_num(target_reg);
-    Addr reg = create_greg(r_num, 0);
-    handle_ldst(/*atStore=*/true, /*isSink=*/true, cpu, /*src_or_sink=*/reg, 
-                vaddr, data, size_in_bits, isSigned, target_reg, r_num);
+    Addr reg_addr;
+    if (get_reg_addr(target_reg, reg_addr) == 0) {
+        handle_ldst(/*atStore=*/true, /*isSink=*/true, cpu, /*src_or_sink=*/reg_addr, 
+                    vaddr, data, size_in_bits, isSigned, target_reg);
+    }
 }
+
 
 
 // before a load, we'll check taint on the memory being loaded and maybe logging a st->ld flow
 // the memory is a flow sink
 void before_load(CPUState* cpu, uint64_t vaddr, uint64_t data, size_t size_in_bits, bool isSigned, enum panda_gp_reg_enum target_reg) {
-    if (vaddr == 0xffff8880366b6a20) printf ("SAW the vaddr\n");
     pair p = get_maddr(cpu, true, vaddr);
     if (!p.first) return;
-    Addr mem = p.second;
-    int r_num = get_r_num(target_reg);
+    Addr mem_addr = p.second;
     if (p.first) 
-        handle_ldst(/*atStore=*/false, /*isSink=*/true, cpu, /*src_or_sink=*/mem, 
-                    vaddr, data, size_in_bits, isSigned, target_reg, r_num);
+        handle_ldst(/*atStore=*/false, /*isSink=*/true, cpu, /*src_or_sink=*/mem_addr, 
+                    vaddr, data, size_in_bits, isSigned, target_reg);
 }
+
 
 
 // after a store, we'll label taint on the memory written
 // the memory is a flow source 
 void after_store(CPUState *cpu, uint64_t vaddr, uint64_t data, size_t size_in_bits, bool isSigned, enum panda_gp_reg_enum target_reg) {
-    if (vaddr == 0xffff8880366b6a20) printf ("SAW the vaddr\n");
     pair p = get_maddr(cpu, true, vaddr);
     if (!p.first) return;
-    Addr mem = p.second;
-    int r_num = get_r_num(target_reg);
+    Addr mem_addr = p.second;
     if (p.first) 
-        handle_ldst(/*atStore=*/true, /*isSink=*/false, cpu, /*src_or_sink=*/mem, 
-                    vaddr, data, size_in_bits, isSigned, target_reg, r_num);
+        handle_ldst(/*atStore=*/true, /*isSink=*/false, cpu, /*src_or_sink=*/mem_addr, 
+                    vaddr, data, size_in_bits, isSigned, target_reg);
 }
  
 
+
 // after a load, we'll label taint on the register
 void after_load(CPUState* cpu, uint64_t vaddr, uint64_t data, size_t size_in_bits, bool isSigned, enum panda_gp_reg_enum target_reg) {
-    if (vaddr == 0xffff8880366b6a20) printf ("SAW the vaddr\n");
-    int r_num = get_r_num(target_reg);
-    Addr reg = create_greg(r_num, 0);
-    handle_ldst(/*atStore=*/false, /*isSink=*/false, cpu, /*src_or_sink=*/reg, 
-                vaddr, data, size_in_bits, isSigned, target_reg, r_num);
+    Addr reg_addr;
+    if (get_reg_addr(target_reg, reg_addr) == 0) {
+        handle_ldst(/*atStore=*/false, /*isSink=*/false, cpu, /*src_or_sink=*/reg_addr, 
+                    vaddr, data, size_in_bits, isSigned, target_reg);
+    }
 }
 
 
-
-
-void bbe(CPUState *cpu, TranslationBlock *tb) {
-    cout << "before block exec pc = " << hex << (tb->pc) << dec << "\n";
-}
 
 bool init_plugin(void *self) {
 
@@ -1046,9 +1113,6 @@ bool init_plugin(void *self) {
     printf ("max_tcn=%d\n", max_tcn);
 
     panda_cb pcb;
-
-    pcb.before_block_exec = bbe;
-    panda_register_callback(self, PANDA_CB_BEFORE_BLOCK_EXEC, pcb);
 
     // just to turn on taint (unfortunate)
     pcb.before_block_translate = enable_taint;
