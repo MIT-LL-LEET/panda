@@ -5,6 +5,8 @@
 #include "panda/callbacks/cb-support.h"
 #include "panda/common.h"
 
+#include "panda/tcg-mmu-callbacks-regfind.h"
+
 #include "panda/rr/rr_log.h"
 #include "panda/rr/rr_api.h"
 #include "exec/cpu-common.h"
@@ -337,4 +339,29 @@ void PCB(mem_after_write)(CPUState *env, target_ptr_t pc, target_ptr_t addr,
                                               data_size, (uint8_t *)&val);
         }
     }
+}
+
+void PCB(before_load)(CPUState* env, uint64_t addr, uint64_t data, size_t width, bool isSigned, enum panda_gp_reg_enum target_reg)
+{
+    for(panda_cb_list* plist = panda_cbs[PANDA_CB_BEFORE_LOAD]; plist != NULL; plist = panda_cb_list_next(plist))
+        if (plist->enabled)
+            plist->entry.before_load(env, addr, data, width, isSigned, target_reg);
+}
+void PCB(after_load)(CPUState* env, uint64_t addr, uint64_t data, size_t width, bool isSigned, enum panda_gp_reg_enum target_reg)
+{
+    for(panda_cb_list* plist = panda_cbs[PANDA_CB_AFTER_LOAD]; plist != NULL; plist = panda_cb_list_next(plist))
+        if (plist->enabled)
+            plist->entry.after_load(env, addr, data, width, isSigned, target_reg);
+}
+void PCB(before_store)(CPUState* env, uint64_t addr, uint64_t data, size_t width, bool isSigned, enum panda_gp_reg_enum target_reg)
+{
+    for(panda_cb_list* plist = panda_cbs[PANDA_CB_BEFORE_STORE]; plist != NULL; plist = panda_cb_list_next(plist))
+        if (plist->enabled)
+            plist->entry.before_store(env, addr, data, width, isSigned, target_reg);
+}
+void PCB(after_store)(CPUState* env, uint64_t addr, uint64_t data, size_t width, bool isSigned, enum panda_gp_reg_enum target_reg)
+{
+    for(panda_cb_list* plist = panda_cbs[PANDA_CB_AFTER_STORE]; plist != NULL; plist = panda_cb_list_next(plist))
+        if (plist->enabled)
+            plist->entry.after_store(env, addr, data, width, isSigned, target_reg);
 }

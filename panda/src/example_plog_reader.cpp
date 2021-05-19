@@ -13,6 +13,9 @@
 */
 
 #include <fstream>
+
+//#define PLOG_READER 1
+
 #include "panda/plog-cc.hpp"
 
 /* plog-cc.cpp dependencies.
@@ -50,7 +53,7 @@ void pprint(std::unique_ptr<panda::LogEntry> ple) {
 
 int main (int argc, char **argv) {
 
-    memset(&cpus, 0, sizeof(cpus));
+//    memset(&cpus, 0, sizeof(cpus));
 
     if (argc < 2) {
          printf("USAGE: %s <plog>\n", argv[0]);

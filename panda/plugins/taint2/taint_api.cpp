@@ -59,6 +59,15 @@ Addr make_greg(uint64_t r, uint16_t off) {
     return a;
 }
 
+Addr make_gspec(uint64_t r, uint16_t off) {
+    Addr a;
+    a.typ = GSPEC;
+    a.val.gr = r;
+    a.off = off;
+    a.flag = (AddrFlag) 0;
+    return a;
+}
+
 extern bool debug_taint;
 target_ulong debug_asid = 0;
 
@@ -167,13 +176,17 @@ void taint2_label_io(uint64_t ia, uint32_t l) {
     tp_label(a, l);
 }
 
+void taint2_label(Addr a, uint32_t l) {
+    if (a.typ == LADDR)
+        taint_log("LABEL: Laddr[%lx] offset=%d (%d)\n", a.val.la, a.off, l);
+    if (a.typ == GREG)
+        taint_log("LABEL: Greg[%lx] offset=%d (%d)\n", a.val.gr, a.off, l);
+    tp_label(a, l);
+}
+
 void taint2_label_addr(Addr a, int offset, uint32_t l) {
     a.off = offset;
-    if (a.typ == LADDR)
-        taint_log("LABEL: Laddr[%lx] offset=%d (%d)\n", a.val.la, offset, l);
-    if (a.typ == GREG)
-        taint_log("LABEL: Greg[%lx] offset=%d (%d)\n", a.val.gr, offset, l);
-    tp_label(a, l);
+    taint2_label(a, l);
 }
 
 void taint2_label_reg(int reg_num, int offset, uint32_t l) {
@@ -279,6 +292,11 @@ uint32_t taint2_query_reg(int reg_num, int offset) {
 }
 
 
+uint32_t taint2_query_addr(Addr a) {
+    LabelSetP ls = tp_labelset_get(a);
+    return ls ? ls->size() : 0;
+}
+
 
 // if IO address is untainted, return 0
 // otherwise, return the label set cardinality
@@ -372,6 +390,12 @@ uint32_t taint2_query_tcn(Addr a) {
     return tp_query_full(a).tcn;
 }
 
+uint32_t taint2_query_tcn_addr(Addr a) {
+    return taint2_query_tcn(a);
+}
+
+
+
 uint32_t taint2_query_tcn_ram(uint64_t RamOffset) {
     return taint2_query_tcn(make_maddr(RamOffset));
 }
@@ -384,7 +408,7 @@ uint32_t taint2_query_tcn_io(uint64_t ia) {
     return taint2_query_tcn(make_iaddr(ia));
 }
 
-uint64_t taint2_query_cb_mask(Addr a, uint8_t size) {
+uint64_t taint2_query_cb_mask_8(Addr a, uint8_t size) {
     uint64_t cb_mask = 0;
     for (unsigned i = 0; i < size; i++, a.off++) {
         cb_mask |= tp_query_full(a).cb_mask << (i * 8);
@@ -392,8 +416,21 @@ uint64_t taint2_query_cb_mask(Addr a, uint8_t size) {
     return cb_mask;
 }
 
+uint8_t taint2_query_cb_mask(Addr a) {
+    return tp_query_full(a).cb_mask;
+}
+
+uint8_t taint2_query_cb_mask_ram(uint64_t RamOffset) {
+    Addr a = make_maddr(RamOffset);
+    return tp_query_full(a).cb_mask;
+}
+
 uint32_t taint2_num_labels_applied(void) {
     return labels_applied.size();
+}
+
+void taint2_delete(Addr a) {
+    tp_delete(a);
 }
 
 void taint2_delete_ram(uint64_t RamOffset) {
@@ -411,8 +448,12 @@ void taint2_delete_io(uint64_t ia) {
     tp_delete(a);
 }
 
-void taint2_labelset_addr_iter(Addr a, int (*app)(uint32_t el, void *stuff1), void *stuff2) {
+void taint2_labelset_iter(Addr a, int (*app)(uint32_t el, void *stuff1), void *stuff2) {
     tp_ls_iter(tp_labelset_get(a), app, stuff2);
+}
+
+void taint2_labelset_addr_iter(Addr a, int (*app)(uint32_t el, void *stuff1), void *stuff2) {
+    taint2_labelset_iter(a, app, stuff2);
 }
 
 void taint2_labelset_ram_iter(uint64_t RamOffset, int (*app)(uint32_t el, void *stuff1), void *stuff2) {
@@ -426,6 +467,7 @@ void taint2_labelset_reg_iter(int reg_num, int offset, int (*app)(uint32_t el, v
 void taint2_labelset_io_iter(uint64_t ia, int (*app)(uint32_t el, void *stuff1), void *stuff2) {
     tp_ls_iter(tp_labelset_get(make_iaddr(ia)), app, stuff2);
 }
+
 
 void taint2_track_taint_state(void) {
     track_taint_state = true;
@@ -575,3 +617,37 @@ void taint2_query_ram_full(uint64_t RamOffset, QueryResult *qr) {
 	qr->ls = (void *) td.ls;  // this should be a (const std::set<TaintLabel> *) type
 	taint2_query_results_iter(qr);
 }
+
+
+Addr create_haddr(uint64_t a) {
+    return make_haddr(a);
+}
+
+Addr create_iaddr(uint64_t a) {
+    return make_iaddr(a);
+}
+
+Addr create_paddr(uint64_t a) {
+    return make_paddr(a);
+}
+
+Addr create_maddr(uint64_t a) {
+    return make_maddr(a);
+}
+
+Addr create_laddr(uint64_t a, uint64_t off) {
+    return make_laddr(a, off);
+}
+
+Addr create_greg(uint64_t r, uint16_t off) {
+    return make_greg(r, off);
+}
+
+Addr create_gspec(uint64_t r, uint16_t off) {
+    return make_gspec(r, off);
+}
+
+
+
+
+

@@ -35,6 +35,7 @@
  */
 
 #include <llvm/Support/TargetSelect.h>
+#include <llvm/ExecutionEngine/SectionMemoryManager.h>
 
 #include <llvm/Bitcode/BitcodeReader.h>
 #include <llvm/Bitcode/BitcodeWriter.h>
@@ -63,6 +64,10 @@
 #include "panda/cheaders.h"
 #include "panda/tcg-llvm.h"
 #include "panda/helper_runtime.h"
+extern "C" {
+#include "panda/callbacks/cb-support.h"
+#include "panda/tcg-mmu-helpers.h"
+}
 
 #if defined(CONFIG_SOFTMMU)
 
@@ -584,6 +589,276 @@ inline Value *TCGLLVMTranslator::generateQemuMemOp(bool ld,
         return nullptr;
     }
 #endif // CONFIG_SOFTMMU
+}
+
+/* in reality these have values 0 - 3, so we could shift, but I don't want to assert that */
+static constexpr size_t _GetOpSize(TCGMemOp opc)
+{
+    return ((opc & MO_SIZE) == MO_8) ? 8 : (
+        ((opc & MO_SIZE) == MO_16) ? 16 : (
+            ((opc & MO_SIZE) == MO_32) ? 32 : (
+                ((opc & MO_SIZE) == MO_64) ? 64 : (size_t) -1 /* this is impossible, C++11 only allows return in constexpr */
+            )
+        )
+    );
+/*    switch (opc & MO_SIZE)
+    {
+        case MO_8:
+            return 8;
+        case MO_16:
+            return 16;
+        case MO_32:
+            return 32;
+        case MO_64:
+            return 64;
+    }*/
+}
+
+inline void TCGLLVMTranslator::generatePandaMMULoadCallback(const TCGArg *args, bool is64, bool isPre)
+{
+    llvm::Value* datalo;
+    llvm::Value* datahi;
+    llvm::Value* addrlo;
+    llvm::Value* addrhi;
+    TCGMemOpIdx oi;
+    TCGMemOp opc;
+
+    if (isPre)
+    {
+        datalo = constInt(TCG_TARGET_REG_BITS, 0);
+        datahi = constInt(TCG_TARGET_REG_BITS, 0);
+    }
+    else
+    {
+        datalo = getValue(*args++);
+        datahi = (TCG_TARGET_REG_BITS == 32 && is64 ? getValue(*args++) : constInt(TCG_TARGET_REG_BITS, 0));
+    }
+    addrlo = getValue(*args++);
+    addrhi = (TARGET_LONG_BITS > TCG_TARGET_REG_BITS ? getValue(*args++) : constInt(TCG_TARGET_REG_BITS, 0));
+    oi = *args++;
+    opc = get_memop(oi);
+    bool isSigned = !!(opc & MO_SIGN);
+    int32_t target_reg = (int32_t)*args++;
+
+    /*
+        TODO: We should determine a way to deal with this to correctly
+              sign extend 64bit values on 32bit hosts...
+              I'd guess if the low value is not 32bits already, there
+              is no real high value so we could just set it to -1
+              and sign extend the low value...
+              But I suppose for efficiency sake if the low value is -1
+              you could have an 8 bit register while the high value
+              has meaningful bits.
+              For now I'm just treating them like Windows LARGE_INTEGERS
+              so the low value is unsigned and the high value is signed.
+    */
+    if (datalo->getType()->getIntegerBitWidth() != TCG_TARGET_REG_BITS)
+    {
+        /*datalo = m_builder.CreateTrunc(datalo, intType(TCG_TARGET_REG_BITS));*/
+        datalo = m_builder.CreateZExt(datalo, intType(TCG_TARGET_REG_BITS));
+    }
+    if (datahi->getType()->getIntegerBitWidth() != TCG_TARGET_REG_BITS)
+    {
+        /*datahi = m_builder.CreateTrunc(datahi, intType(TCG_TARGET_REG_BITS));*/
+        if (isSigned)
+            datahi = m_builder.CreateSExt(datahi, intType(TCG_TARGET_REG_BITS));
+        else
+            datahi = m_builder.CreateZExt(datahi, intType(TCG_TARGET_REG_BITS));
+    }
+    if (addrlo->getType() != intType(TCG_TARGET_REG_BITS) || addrhi->getType() != intType(TCG_TARGET_REG_BITS))
+    {
+        fprintf(stderr, "addrlo(%d) or addrhi(%d) not TCG_TARGET_REG_BITS(%d) length\n", (int)addrlo->getType()->getIntegerBitWidth(), (int)addrhi->getType()->getIntegerBitWidth(), (int)TCG_TARGET_REG_BITS);
+        exit(-1);
+    }
+
+    if (TCG_TARGET_REG_BITS == 32)
+    {
+        std::vector<llvm::Value*> argValues;
+        argValues.reserve(9);
+
+        argValues.push_back(addrlo);
+        argValues.push_back(addrhi);
+        argValues.push_back(datalo);
+        argValues.push_back(datahi);
+        argValues.push_back(llvm::ConstantInt::get(llvm::IntegerType::get(*m_context, sizeof(size_t) * CHAR_BIT), _GetOpSize(opc), false));
+        argValues.push_back(llvm::ConstantInt::get(llvm::IntegerType::get(*m_context, sizeof(int) * CHAR_BIT), isSigned, false));
+        argValues.push_back(llvm::ConstantInt::get(llvm::IntegerType::get(*m_context, sizeof(int) * CHAR_BIT), isPre, false));
+        argValues.push_back(getEnv());
+        argValues.push_back(llvm::ConstantInt::get(llvm::IntegerType::get(*m_context, sizeof(int32_t)* CHAR_BIT), target_reg, false));
+
+        std::vector<llvm::Type*> argTypes;
+        argTypes.reserve(9);
+        for (int i = 0; i < 9; ++i)
+            argTypes.push_back(argValues[i]->getType());
+
+        llvm::FunctionType* helperFunctionTy = FunctionType::get(llvm::Type::getVoidTy(*m_context), argTypes, false);
+
+        const char* funcName = "helper_panda_beforeafter_load32";
+        llvm::Function* helperFunction = m_module->getFunction(funcName);
+        if(!helperFunction) {
+            helperFunction = llvm::Function::Create(
+                    helperFunctionTy,
+                    llvm::Function::ExternalLinkage, funcName, m_module.get());
+/*            m_executionEngine->addGlobalMapping(helperFunction,
+                                                (void*)helper_panda_beforeafter_load32);*/
+        }
+
+        m_builder.CreateCall(helperFunction, llvm::ArrayRef<llvm::Value*>(argValues));
+        return;
+    }
+    else
+    {
+        std::vector<llvm::Value*> argValues;
+        argValues.reserve(7);
+
+        argValues.push_back(addrlo);
+        argValues.push_back(datalo);
+        argValues.push_back(llvm::ConstantInt::get(llvm::IntegerType::get(*m_context, sizeof(size_t) * CHAR_BIT), _GetOpSize(opc), false));
+        argValues.push_back(llvm::ConstantInt::get(llvm::IntegerType::get(*m_context, sizeof(int) * CHAR_BIT), isSigned, false));
+        argValues.push_back(llvm::ConstantInt::get(llvm::IntegerType::get(*m_context, sizeof(int) * CHAR_BIT), isPre, false));
+        argValues.push_back(getEnv());
+        argValues.push_back(llvm::ConstantInt::get(llvm::IntegerType::get(*m_context, sizeof(int32_t)* CHAR_BIT), target_reg, false));
+
+        std::vector<llvm::Type*> argTypes;
+        argTypes.reserve(7);
+        for (int i = 0; i < 7; ++i)
+            argTypes.push_back(argValues[i]->getType());
+
+        FunctionType* helperFunctionTy = FunctionType::get(llvm::Type::getVoidTy(*m_context), argTypes, false);
+
+        const char* funcName = "helper_panda_beforeafter_load64";
+        Function* helperFunction = m_module->getFunction(funcName);
+        if(!helperFunction) {
+            helperFunction = Function::Create(
+                    helperFunctionTy,
+                    Function::ExternalLinkage, funcName, m_module.get());
+/*            m_executionEngine->addGlobalMapping(helperFunction,
+                                                (void*)helper_panda_beforeafter_load64);*/
+        }
+
+        m_builder.CreateCall(helperFunction, llvm::ArrayRef<llvm::Value*>(argValues));
+        return;
+    }
+}
+
+inline void TCGLLVMTranslator::generatePandaMMUStoreCallback(const TCGArg *args, bool is64, bool isPre)
+{
+    llvm::Value* datalo;
+    llvm::Value* datahi;
+    llvm::Value* addrlo;
+    llvm::Value* addrhi;
+    TCGMemOpIdx oi;
+    TCGMemOp opc;
+
+    datalo = getValue(*args++);
+    datahi = (TCG_TARGET_REG_BITS == 32 && is64 ? getValue(*args++) : constInt(TCG_TARGET_REG_BITS, 0));
+    addrlo = getValue(*args++);
+    addrhi = (TARGET_LONG_BITS > TCG_TARGET_REG_BITS ? getValue(*args++) : constInt(TCG_TARGET_REG_BITS, 0));
+    oi = *args++;
+    opc = get_memop(oi);
+    bool isSigned = !!(opc & MO_SIGN);
+    int32_t target_reg = (int32_t)*args++;
+
+    /*
+        TODO: We should determine a way to deal with this to correctly
+              sign extend 64bit values on 32bit hosts...
+              I'd guess if the low value is not 32bits already, there
+              is no real high value so we could just set it to -1
+              and sign extend the low value...
+              But I suppose for efficiency sake if the low value is -1
+              you could have an 8 bit register while the high value
+              has meaningful bits.
+              For now I'm just treating them like Windows LARGE_INTEGERS
+              so the low value is unsigned and the high value is signed.
+    */
+    if (datalo->getType()->getIntegerBitWidth() != TCG_TARGET_REG_BITS)
+    {
+        /*datalo = m_builder.CreateTrunc(datalo, intType(TCG_TARGET_REG_BITS));*/
+        datalo = m_builder.CreateZExt(datalo, intType(TCG_TARGET_REG_BITS));
+    }
+    if (datahi->getType()->getIntegerBitWidth() != TCG_TARGET_REG_BITS)
+    {
+        /*datahi = m_builder.CreateTrunc(datahi, intType(TCG_TARGET_REG_BITS));*/
+        if (isSigned)
+            datahi = m_builder.CreateSExt(datahi, intType(TCG_TARGET_REG_BITS));
+        else
+            datahi = m_builder.CreateZExt(datahi, intType(TCG_TARGET_REG_BITS));
+    }
+
+    if (addrlo->getType() != intType(TCG_TARGET_REG_BITS) || addrhi->getType() != intType(TCG_TARGET_REG_BITS))
+    {
+        fprintf(stderr, "addrlo(%d) or addrhi(%d) not TCG_TARGET_REG_BITS(%d) length\n", (int)addrlo->getType()->getIntegerBitWidth(), (int)addrhi->getType()->getIntegerBitWidth(), (int)TCG_TARGET_REG_BITS);
+        exit(-1);
+    }
+
+    if (TCG_TARGET_REG_BITS == 32)
+    {
+        std::vector<llvm::Value*> argValues;
+        argValues.reserve(9);
+
+        argValues.push_back(addrlo);
+        argValues.push_back(addrhi);
+        argValues.push_back(datalo);
+        argValues.push_back(datahi);
+        argValues.push_back(llvm::ConstantInt::get(llvm::IntegerType::get(*m_context, sizeof(size_t) * CHAR_BIT), _GetOpSize(opc), false));
+        argValues.push_back(llvm::ConstantInt::get(llvm::IntegerType::get(*m_context, sizeof(int) * CHAR_BIT), isSigned, false));
+        argValues.push_back(llvm::ConstantInt::get(llvm::IntegerType::get(*m_context, sizeof(int) * CHAR_BIT), isPre, false));
+        argValues.push_back(getEnv());
+        argValues.push_back(llvm::ConstantInt::get(llvm::IntegerType::get(*m_context, sizeof(int32_t)* CHAR_BIT), target_reg, false));
+
+        std::vector<llvm::Type*> argTypes;
+        argTypes.reserve(9);
+        for (int i = 0; i < 9; ++i)
+            argTypes.push_back(argValues[i]->getType());
+
+        llvm::FunctionType* helperFunctionTy = FunctionType::get(llvm::Type::getVoidTy(*m_context), argTypes, false);
+
+        const char* funcName = "helper_panda_beforeafter_store32";
+        llvm::Function* helperFunction = m_module->getFunction(funcName);
+        if(!helperFunction) {
+            helperFunction = llvm::Function::Create(
+                    helperFunctionTy,
+                    llvm::Function::ExternalLinkage, funcName, m_module.get());
+/*            m_executionEngine->addGlobalMapping(helperFunction,
+                                                (void*)helper_panda_beforeafter_store32);*/
+        }
+
+        m_builder.CreateCall(helperFunction, llvm::ArrayRef<llvm::Value*>(argValues));
+        return;
+    }
+    else
+    {
+        std::vector<llvm::Value*> argValues;
+        argValues.reserve(7);
+
+        argValues.push_back(addrlo);
+        argValues.push_back(datalo);
+        argValues.push_back(llvm::ConstantInt::get(llvm::IntegerType::get(*m_context, sizeof(size_t) * CHAR_BIT), _GetOpSize(opc), false));
+        argValues.push_back(llvm::ConstantInt::get(llvm::IntegerType::get(*m_context, sizeof(int) * CHAR_BIT), isSigned, false));
+        argValues.push_back(llvm::ConstantInt::get(llvm::IntegerType::get(*m_context, sizeof(int) * CHAR_BIT), isPre, false));
+        argValues.push_back(getEnv());
+        argValues.push_back(llvm::ConstantInt::get(llvm::IntegerType::get(*m_context, sizeof(int32_t)* CHAR_BIT), target_reg, false));
+
+        std::vector<llvm::Type*> argTypes;
+        argTypes.reserve(7);
+        for (int i = 0; i < 7; ++i)
+            argTypes.push_back(argValues[i]->getType());
+
+        FunctionType* helperFunctionTy = FunctionType::get(llvm::Type::getVoidTy(*m_context), argTypes, false);
+
+        const char* funcName = "helper_panda_beforeafter_store64";
+        Function* helperFunction = m_module->getFunction(funcName);
+        if(!helperFunction) {
+            helperFunction = Function::Create(
+                    helperFunctionTy,
+                    Function::ExternalLinkage, funcName, m_module.get());
+/*            m_executionEngine->addGlobalMapping(helperFunction,
+                                                (void*)helper_panda_beforeafter_store64);*/
+        }
+
+        m_builder.CreateCall(helperFunction, llvm::ArrayRef<llvm::Value*>(argValues));
+        return;
+    }
 }
 
 int TCGLLVMTranslator::generateOperation(int opc, const TCGOp *op,
@@ -1155,6 +1430,32 @@ int TCGLLVMTranslator::generateOperation(int opc, const TCGOp *op,
 
 #undef __OP_QEMU_LD
 #undef __OP_QEMU_ST
+
+    /* PANDA Faux MMU Ops (NOPs) */
+    case INDEX_op_panda_before_mmu_ld_i32:
+        generatePandaMMULoadCallback(args, false, true);
+        break;
+    case INDEX_op_panda_before_mmu_ld_i64:
+        generatePandaMMULoadCallback(args, true, true);
+        break;
+    case INDEX_op_panda_after_mmu_ld_i32:
+        generatePandaMMULoadCallback(args, false, false);
+        break;
+    case INDEX_op_panda_after_mmu_ld_i64:
+        generatePandaMMULoadCallback(args, true, false);
+        break;
+    case INDEX_op_panda_before_mmu_st_i32:
+        generatePandaMMUStoreCallback(args, false, true);
+        break;
+    case INDEX_op_panda_before_mmu_st_i64:
+        generatePandaMMUStoreCallback(args, true, true);
+        break;
+    case INDEX_op_panda_after_mmu_st_i32:
+        generatePandaMMUStoreCallback(args, false, false);
+        break;
+    case INDEX_op_panda_after_mmu_st_i64:
+        generatePandaMMUStoreCallback(args, true, false);
+        break;
 
     case INDEX_op_exit_tb:
         m_builder.CreateRet(constWord(args[0]));

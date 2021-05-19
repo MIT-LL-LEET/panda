@@ -508,10 +508,10 @@ void taint_pointer(Shad *shad_dest, uint64_t dest, Shad *shad_ptr, uint64_t ptr,
         src = ones; // ignore source.
     }
 
-    // query taint on pointer either being read or written
-    if (tainted_pointer & TAINT_POINTER_MODE_CHECK) {
-        taint_pointer_run(src, ptr, dest, (bool) is_store, size);
-    }
+//    // query taint on pointer either being read or written
+//    if (tainted_pointer & TAINT_POINTER_MODE_CHECK) {
+//        taint_pointer_run(src, ptr, dest, (bool) is_store, size);
+//    }
 
     // this is [1234] in our example
     TaintData ptr_td = mixed_labels(shad_ptr, ptr, ptr_size, false);
@@ -552,6 +552,12 @@ void taint_pointer(Shad *shad_dest, uint64_t dest, Shad *shad_ptr, uint64_t ptr,
             }
         }
     }
+}
+
+void taint_pointer_check_run(uint64_t ptr_addr, uint64_t ptr_size, bool is_store);
+
+void taint_pointer_check(uint64_t ptr_addr, uint64_t ptr_size, uint64_t is_store) {
+    taint_pointer_check_run(ptr_addr, ptr_size, (bool)is_store);
 }
 
 void taint_after_ld_run(uint64_t reg, uint64_t addr, uint64_t size);

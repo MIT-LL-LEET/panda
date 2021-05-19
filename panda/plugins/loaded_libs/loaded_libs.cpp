@@ -32,7 +32,6 @@ void cleanup_osi(OsiProc *current, OsiThread *thread, GArray *ms) {
     if (ms) cleanup_garray(ms);
 }
 
-const char* program_name;
 
 uint64_t get_libs_count = 0;
 uint64_t get_libs_failed_count = 0;
@@ -44,7 +43,6 @@ void get_libs(CPUState *env) {
     bool fail = false;
     OsiProc *current =  get_current_process(env);
     if (current == NULL) fail=true;
-	if (program_name && strcmp(current->name, program_name)) fail=true;
     if (current->pid == 0) fail=true;
     GArray *ms = get_mappings(env, current);
     if (ms == NULL) fail=true;
@@ -138,10 +136,6 @@ bool init_plugin(void *self) {
     panda_cb pcb;
     pcb.before_block_exec = before_block;
     panda_register_callback(self, PANDA_CB_BEFORE_BLOCK_EXEC, pcb);
-
-    panda_arg_list *args;
-    args = panda_get_args("loaded_libs");
-    program_name = panda_parse_string_opt(args, "program_name", NULL, "program name to collect libraries for");
 
     return true;
 }

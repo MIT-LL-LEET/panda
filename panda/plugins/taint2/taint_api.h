@@ -11,12 +11,21 @@
 #endif
 
 
-
 extern "C" {
 // For the C API to taint accessible from other plugins
+
+
+Addr create_haddr(uint64_t a);
+Addr create_iaddr(uint64_t a);
+Addr create_maddr(uint64_t a);
+Addr create_laddr(uint64_t a, uint64_t o);
+Addr create_greg(uint64_t r, uint16_t off);
+Addr create_gspec(uint64_t r, uint16_t off);
+
 void taint2_enable_taint(void);
 void taint2_enable_tainted_pointer(void);
 int taint2_enabled(void);
+void taint2_label(Addr a, uint32_t l) ;
 void taint2_label_addr(Addr a, int offset, uint32_t l) ;
 void taint2_label_ram(uint64_t RamOffset, uint32_t l) ;
 void taint2_label_reg(int reg_num, int offset, uint32_t l) ;
@@ -27,6 +36,7 @@ void taint2_label_io_additive(uint64_t ia, uint32_t l);
 void taint2_add_taint_ram_pos(CPUState *cpu, uint64_t addr, uint32_t length, uint32_t start_label);
 void taint2_add_taint_ram_single_label(CPUState *cpu, uint64_t addr,
     uint32_t length, long label);
+void taint2_delete(Addr a);
 void taint2_delete_ram(uint64_t RamOffset);
 void taint2_delete_reg(int reg_num, int offset);
 void taint2_delete_io(uint64_t ia);
@@ -34,6 +44,7 @@ void taint2_delete_io(uint64_t ia);
 Panda__TaintQuery *taint2_query_pandalog (Addr addr, uint32_t offset);
 void pandalog_taint_query_free(Panda__TaintQuery *tq);
 
+uint32_t taint2_query(Addr a);
 uint32_t taint2_query(Addr a);
 uint32_t taint2_query_ram(uint64_t RamOffset);
 uint32_t taint2_query_laddr(uint64_t la, uint64_t off);
@@ -54,8 +65,11 @@ uint32_t taint2_query_tcn_reg(int reg_num, int offset);
 uint32_t taint2_query_tcn_io(uint64_t ia);
 uint32_t taint2_query_tcn_llvm(int reg_num, int offset);
 
-uint64_t taint2_query_cb_mask(Addr a, uint8_t size);
+uint64_t taint2_query_cb_mask_8(Addr a, uint8_t size);
+uint8_t taint2_query_cb_mask_ram(uint64_t RamOffset);
+uint8_t taint2_query_cb_mask(Addr a);
 
+void taint2_labelset_iter(Addr addr, int (*app)(uint32_t el, void *stuff1), void *stuff2);
 void taint2_labelset_addr_iter(Addr addr, int (*app)(uint32_t el, void *stuff1), void *stuff2);
 void taint2_labelset_ram_iter(uint64_t RamOffset, int (*app)(uint32_t el, void *stuff1), void *stuff2);
 void taint2_labelset_reg_iter(int reg_num, int offset, int (*app)(uint32_t el, void *stuff1), void *stuff2);

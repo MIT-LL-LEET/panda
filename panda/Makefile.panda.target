@@ -155,6 +155,15 @@ obj-y += panda/llvm/helper_runtime.o
 panda/llvm/tcg-llvm.o-cflags := $(LLVM_CXXFLAGS) -Wno-cast-qual
 panda/llvm/helper_runtime.o-cflags := $(LLVM_CXXFLAGS) -Wno-cast-qual
 
+panda/src/tcg-mmu-callbacks.o: $(SRC_PATH)/panda/include/panda/tcg-mmu-callbacks.h
+panda/src/tcg-mmu-callbacks-regfind.o: $(SRC_PATH)/panda/include/panda/tcg-mmu-callbacks-regfind.h
+panda/src/tcg-mmu-callbacks-regfind-i386.o: $(SRC_PATH)/panda/include/panda/tcg-mmu-callbacks-regfind-i386.h
+panda/src/tcg-mmu-helpers.o: $(SRC_PATH)/panda/include/panda/tcg-mmu-helpers.h
+obj-y += panda/src/tcg-mmu-callbacks.o panda/src/tcg-mmu-callbacks-regfind.o panda/src/tcg-mmu-helpers.o
+ifneq ($(strip $(TARGET_I386) $(TARGET_X86_64)),)
+obj-y += panda/src/tcg-mmu-callbacks-regfind-i386.o
+endif
+
 # regular bitcode
 llvm-y =
 

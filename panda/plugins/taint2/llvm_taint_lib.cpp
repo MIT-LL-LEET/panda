@@ -146,15 +146,15 @@ void taint_branch_run(Shad *shad, uint64_t src, uint64_t size)
     PPP_RUN_CB(on_branch2, a, size);
 }
 
-void taint_pointer_run(uint64_t src, uint64_t ptr, uint64_t dest, bool is_store,
-        uint64_t size) {
 
+void taint_pointer_check_run(uint64_t ptra, uint64_t ptr_size, bool is_store) {
     // I think this has to be an LLVM register
-    Addr ptr_addr = make_laddr(ptr / MAXREGSIZE, 0);
+    Addr ptr_addr = make_laddr(ptra / MAXREGSIZE, 0);
     if (is_store) {
-        PPP_RUN_CB(on_ptr_store, ptr_addr, dest, size);
-    } else {
-        PPP_RUN_CB(on_ptr_load, ptr_addr, src, size);
+        PPP_RUN_CB(on_ptr_store, ptr_addr, ptr_size);
+    }
+    else {
+        PPP_RUN_CB(on_ptr_load, ptr_addr, ptr_size);
     }
 }
 
@@ -229,6 +229,11 @@ bool PandaTaintFunctionPass::doInitialization(Module &M) {
 
     PTV->pointerF = TaintOpsFunction("taint_pointer",
         (void *) &taint_pointer, argTys, PTV->voidT, false, ES, symbols);
+
+    argTys = { PTV->int64T, PTV->int64T, PTV->int64T };
+
+    PTV->pointerTaintCheck = TaintOpsFunction("taint_pointer_check",
+        (void *) &taint_pointer_check, argTys, PTV->voidT, false, ES, symbols);
 
     argTys = { PTV->shadP, PTV->int64T, PTV->int64T, PTV->int64T,
         PTV->int64T, PTV->int64T, PTV->int64T, PTV->int64T };
@@ -749,6 +754,17 @@ void PandaTaintVisitor::insertTaintPointer(Instruction &I,
     insertCallAfter(*popCI, pointerF, args);
 
     inlineCall(popCI);
+}
+
+
+void PandaTaintVisitor::insertTaintPointerCheck(Instruction &I,
+        Value *ptr, Value *val, bool is_store) {    
+    vector<Value *> args{
+        constSlot(ptr), 
+        const_uint64(getValueSize(ptr)),
+        const_uint64(is_store)
+    };
+    insertCall(I, pointerTaintCheck, args, false, true);
 }
 
 
@@ -1614,6 +1630,9 @@ void PandaTaintVisitor::visitCallInst(CallInst &I) {
             } else {
                 insertTaintCopy(I, llvConst, &I, memConst, NULL, getValueSize(&I));
             }
+            if (!isa<Constant>(ptr)) {
+                insertTaintPointerCheck(I, ptr, &I, false);
+            }
             return;
         } else if (stFuncs.count(calledName) > 0) {
             Value *ptr = I.getArgOperand(1);
@@ -1624,6 +1643,9 @@ void PandaTaintVisitor::visitCallInst(CallInst &I) {
                 insertTaintDelete(I, memConst, NULL, const_uint64(getValueSize(val)));
             } else {
                 insertTaintCopy(I, memConst, NULL, llvConst, val, getValueSize(val));
+            }
+            if (!isa<Constant>(ptr)) {
+                insertTaintPointerCheck(I, ptr, &I, true);
             }
             return;
 #ifdef TARGET_I386

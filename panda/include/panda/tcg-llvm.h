@@ -274,6 +274,8 @@ class TCGLLVMTranslator {
     llvm::Value *generateQemuMemOp(bool ld, llvm::Value *value,
         llvm::Value *addr, int flags, int mem_index, int bits,
         uintptr_t ret_addr);
+    void generatePandaMMULoadCallback(const TCGArg *args, bool is64, bool isPre);
+    void generatePandaMMUStoreCallback(const TCGArg *args, bool is64, bool isPre);
 
     int generateOperation(int opc, const TCGOp *op, const TCGArg *args);
 

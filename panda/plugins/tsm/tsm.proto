@@ -1,0 +1,57 @@
+message Thread {
+    required uint32 pid = 1;
+    required uint32 ppid = 2;
+    required uint32 tid = 3;
+    required uint64 create_time = 4;
+}    
+
+message CodePoint {
+    required Thread thread = 1; 
+    required uint64 pc = 2;
+}
+
+message TaintSource {
+    required CodePoint cp = 1;
+    required uint32 size = 2;          // size or load or store
+    required uint64 value = 3;         // the actual value at the load or store
+    required uint64 instr = 4;        
+    required bool is_store = 5;        // indicates load/store
+    optional uint32 label = 6;
+}    
+
+message TaintSink {
+    required CodePoint cp = 1; 
+    required uint32 size = 2;          // size or load or store
+    required uint64 value = 3;         // the actual value at the load or store 
+    required uint64 instr = 4;        
+    required bool is_store = 5;        // indicates load/store
+}    
+
+// used to generate TSM 
+message TsmChange {
+    required CodePoint cp = 1;           // code that did the write
+    required uint64 vaddr = 2;           // addr / size of the write
+    required uint32 size = 3;
+    required uint32 label = 4;           // the taint label
+}
+
+// flows for pandelephant/LEET/ghidra
+// this is only load -> store
+// plus the computation that happened
+// this one has offset since we need to record each flow to
+// a byte in sink since they may all be different
+message TaintFlow {
+    required TaintSource source = 1;     // source of the flow
+    required TaintSink sink = 2;         // sink of the flow
+    required bool copy = 3;             // true iff this is a copy flow
+    // these are only for 
+    // compute flows (non-copy)
+    optional uint32 offset = 4;        
+    optional uint32 card = 5;
+    optional uint32 tcn = 6;
+    optional uint32 cb = 7;             // # reversible bits
+}
+
+
+optional TaintFlow taint_flow = 57;
+optional TsmChange tsm_change = 59;

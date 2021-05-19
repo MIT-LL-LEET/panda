@@ -58,6 +58,10 @@
 #include "exec/gdbstub.h"
 #include "sysemu/cpus.h"
 
+// from cpu_exec.c
+// used to get right instr count in pandalog for entries
+// written *after* replay finished.
+extern uint64_t panda_num_instr_bb;
 //#define RR_DEBUG
 
 /******************************************************************************************/
@@ -1632,9 +1636,7 @@ void rr_do_end_replay(int is_error)
           rr_size_of_log_entries[i] = 0;
       }
       printf("max_queue_len = %llu\n", rr_max_num_queue_entries);
-#ifdef RR_DEBUG
       printf("Checksum of guest memory: %#08x\n", rr_checksum_memory_internal());
-#endif
     }
     rr_max_num_queue_entries = 0;
 

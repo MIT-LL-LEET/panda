@@ -13,6 +13,13 @@
 
 #include "query_res.h"
 
+Addr create_haddr(uint64_t a);
+Addr create_iaddr(uint64_t a);
+Addr create_maddr(uint64_t a);
+Addr create_laddr(uint64_t a, uint64_t o);
+Addr create_greg(uint64_t r, uint16_t off);
+Addr create_gspec(uint64_t r, uint16_t off);
+
 // turns on taint
 void taint2_enable_taint(void);
 
@@ -21,6 +28,8 @@ void taint2_enable_tainted_pointer(void);
 
 // returns 1 if taint is on
 int taint2_enabled(void);
+
+void taint2_label(Addr a, uint32_t l);
 
 void taint2_label_addr(Addr a, int offset, uint32_t l);
 
@@ -73,7 +82,18 @@ uint32_t taint2_query_tcn_io(uint64_t ia);
 
 // Returns a mask indicating which bits are attacker-controlled (derived
 // reversibly from input).
-uint64_t taint2_query_cb_mask(Addr a, uint8_t size);
+// note: this is really for a range of bytes (size)
+// and all packed into a uint64_t.  So size < 8.
+uint64_t taint2_query_cb_mask_8(Addr a, uint8_t size);
+
+// just return cb mask for this ram offset
+uint8_t taint2_query_cb_mask_ram(uint64_t RamOffset);
+
+
+uint8_t taint2_query_cb_mask(Addr a);
+
+
+void taint2_delete(Addr a);
 
 // delete taint from this RAM Offset
 void taint2_delete_ram(uint64_t RamOffset);
@@ -83,6 +103,9 @@ void taint2_delete_reg(int reg_num, int offset);
 
 // delete taint from this io addr
 void taint2_delete_io(uint64_t ia);
+
+// addr is an opaque.  it should be &a if a is known to be an Addr
+void taint2_labelset_iter(Addr addr, int (*app)(uint32_t el, void *stuff1), void *stuff2);
 
 // addr is an opaque.  it should be &a if a is known to be an Addr
 void taint2_labelset_addr_iter(Addr addr, int (*app)(uint32_t el, void *stuff1), void *stuff2);

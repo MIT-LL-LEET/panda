@@ -59,6 +59,9 @@
 #include "elf.h"
 #include "exec/log.h"
 
+#include "panda/tcg-mmu-callbacks.h"
+#include "panda/tcg-mmu-callbacks-regfind.h"
+
 /* Forward declarations for functions declared in tcg-target.inc.c and
    used here. */
 static void tcg_target_init(TCGContext *s);
@@ -1130,6 +1133,43 @@ void tcg_dump_ops(TCGContext *s)
                         col += qemu_log(",%s%s,%u", s_al, s_op, ix);
                     }
                     i = 1;
+                }
+                break;
+            /* PANDA Faux MMU Ops */
+            case INDEX_op_panda_before_mmu_ld_i32:
+            case INDEX_op_panda_before_mmu_ld_i64:
+            case INDEX_op_panda_after_mmu_ld_i32:
+            case INDEX_op_panda_after_mmu_ld_i64:
+            case INDEX_op_panda_before_mmu_st_i32:
+            case INDEX_op_panda_before_mmu_st_i64:
+            case INDEX_op_panda_after_mmu_st_i32:
+            case INDEX_op_panda_after_mmu_st_i64:
+                {
+                    TCGMemOpIdx oi = args[k++];
+                    TCGMemOp op = get_memop(oi);
+                    unsigned ix = get_mmuidx(oi);
+                    int target_reg = args[k++];
+
+                    if (op & ~(MO_AMASK | MO_BSWAP | MO_SSIZE)) {
+                        col += qemu_log(",$0x%x,%u", op, ix);
+                    } else {
+                        const char *s_al, *s_op;
+                        s_al = alignment_name[(op & MO_AMASK) >> MO_ASHIFT];
+                        s_op = ldst_name[op & (MO_BSWAP | MO_SSIZE)];
+                        col += qemu_log(",%s%s,%u", s_al, s_op, ix);
+                    }
+                    if (target_reg < 0)
+                    {
+                        col += qemu_log(",<target: unknown>");
+                    }
+                    else
+                    {
+                        if (target_reg < PANDA_GP_REG_NAMES_COUNT)
+                            col += qemu_log(",<target: %s>", PANDA_GP_REG_NAMES[target_reg]);
+                        else
+                            col += qemu_log(",<target: overflow(%d)>", target_reg);
+                    }
+                    i = 2;
                 }
                 break;
             default:
@@ -2503,10 +2543,12 @@ void tcg_dump_op_count(FILE *f, fprintf_function cpu_fprintf)
 }
 #endif
 
-
 int tcg_gen_code(TCGContext *s, TranslationBlock *tb)
 {
     int i, oi, oi_next, num_insns;
+
+    /* Allow panda to view and potentially change translation */
+    panda_tcg_pass(s, tb);
 
 #ifdef CONFIG_PROFILER
     {
