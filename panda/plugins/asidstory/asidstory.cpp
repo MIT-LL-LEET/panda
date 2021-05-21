@@ -333,7 +333,8 @@ void spit_asidstory() {
     // if pandalog we dont write asidstory file
     if (pandalog) return;
 
-    printf ("no pandalog -- output to file named asidstory\n");
+    if (debug) 
+        printf ("no pandalog -- output to file named asidstory\n");
 
     FILE *fp = fopen("asidstory", "w");
 
@@ -439,10 +440,16 @@ set <Process> all_procs;
 // store that info for later use
 void save_proc_range(uint64_t instr_end) {
 
+    if (debug) {
+        cout << "save_proc range instr_end=" << instr_end << " pid=" << first_good_proc->pid;
+        cout << " create_time=" << first_good_proc->create_time << " name=" << first_good_proc->name << "\n";
+    }
+    
     const Process process(first_good_proc->pid, first_good_proc->create_time);
 
     // add name alias
     process_names[process].insert(first_good_proc->name);
+
     // add to set of tids observed
     process_tids[process].insert(first_good_proc_tid);
 
@@ -462,32 +469,11 @@ void save_proc_range(uint64_t instr_end) {
     else {
         if (process_asid[process] != first_good_proc->asid)  {
 
-            cout << "asid for process changed! " << first_good_proc->name << " pid=" << first_good_proc->pid << "\n";
-            cout << "... was 0x" << hex << process_asid[process] << " is " << first_good_proc->asid << "\n";
-
-/*
-            GArray *procs = get_processes(first_cpu);
-            if (procs != NULL) {
-                for (int i=0; i<procs->len; i++) {
-                    OsiProc *proc = &g_array_index(procs, OsiProc, i);
-                    cout << "proc[pid=" << dec << proc->pid << ",create_time=" << proc->create_time
-                         << ",name=" << proc->name << ",taskd=" << hex << proc->taskd << ",asid=" << proc->asid
-                         << ",ppid=" << dec << proc->ppid << "]: ";
-                    for (auto p : all_procs) {
-                        if (p.pid == proc->pid && p.create_time == proc->create_time) {
-                            cout << "asid=" << hex << process_asid[p] << " ppid=" << dec << process_ppid[p] << "\n";
-                            for (auto name : process_names[p]) cout << "  name=" << name;
-                            cout << "\n";
-                            for (auto tid : process_tids[p]) cout << "  tid=" << tid;
-                            break;
-                        }
-                    }
-                    cout << "\n";
-                }
+            if (debug) {
+                cout << "asid for process changed! " << first_good_proc->name << " pid=" << first_good_proc->pid << "\n";
+                cout << "... was 0x" << hex << process_asid[process] << " is " << first_good_proc->asid << "\n";
             }
-*/
         }
-  //      assert (process_asid[process] == first_good_proc->asid);
 
       process_asid[process] = first_good_proc->asid;
     }
@@ -557,6 +543,9 @@ bool asidstory_asid_changed(CPUState *env, target_ulong old_asid, target_ulong n
 
         // this means we knew the process during the last asid interval
         // so we'll record that info for later display
+        if (debug) {
+            cout << "calling save_proc_range from asidstory_asid_changed\n";
+        }
         save_proc_range(curr_instr - 100);
 
         if (!pandalog) {
@@ -655,6 +644,8 @@ void asidstory_before_block_exec(CPUState *env, TranslationBlock *tb) {
     }
 
     // all this is about figuring out if and when we know the current process
+    // and, at the transition from 'known' with one name to known with another name
+    // we save a proc range
     switch (process_mode) {
 
     case Process_known: {
@@ -729,6 +720,8 @@ void asidstory_before_block_exec(CPUState *env, TranslationBlock *tb) {
 }
 
 
+// TRL -- why is this even in here.  smells of debugging
+#if 0
 static_assert(CHAR_BIT == 8);
 static_assert(sizeof(char) == sizeof(uint8_t)); /* this is pointless, sizeof(char) == 1 by definition, and uint8_t must be exactly 8 bits if defined */
 string read_guest_null_terminated_string(CPUState *cpu, uint64_t addr) {
@@ -756,7 +749,7 @@ void execveat_cb (CPUState* cpu, target_ptr_t pc, int dfd, target_ptr_t filename
     string filename_s = read_guest_null_terminated_string(cpu, filename);
     cout << "Entering execveat -- filename = [" << filename_s << "\n";
  }
-
+#endif
 
 
 bool init_plugin(void *self) {
@@ -772,6 +765,9 @@ bool init_plugin(void *self) {
     pcb.before_block_exec = asidstory_before_block_exec;
     panda_register_callback(self, PANDA_CB_BEFORE_BLOCK_EXEC, pcb);
 
+
+// I think this was just about debugging something once upon a time?
+#if 0
     #if defined(TARGET_PPC)
         fprintf(stderr, "[ERROR] asidstory: PPC architecture not supported by syscalls2!\n");
         return false;
@@ -781,13 +777,14 @@ bool init_plugin(void *self) {
         PPP_REG_CB("syscalls2", on_sys_execve_enter, execve_cb);
         PPP_REG_CB("syscalls2", on_sys_execveat_enter, execveat_cb);
     #endif
+#endif
 
     panda_arg_list *args = panda_get_args("asidstory");
     num_cells = std::max(panda_parse_uint64_opt(args, "width", 100, "number of columns to use for display"), UINT64_C(80)) - NAMELEN - 5;
 
     summary_mode = panda_parse_bool_opt(args, "summary", "summary mode (for pandalog)");
     if (!pandalog) {
-        printf ("NOT pandalooging\n");
+        printf ("NOT pandalogging\n");
         status_c = (bool *) malloc(sizeof(bool) * num_cells);
         for (int i=0; i<num_cells; i++) status_c[i]=false;
     }
@@ -855,7 +852,8 @@ void uninit_plugin(void *self) {
     spit_asidstory();
 
 
-    cout << "check_proc_succ = " << check_proc_succ << "\n";
-    cout << "check_proc_tot  = " << check_proc_tot << "\n";
-
+    if (debug) {
+        cout << "check_proc_succ = " << check_proc_succ << "\n";
+        cout << "check_proc_tot  = " << check_proc_tot << "\n";
+    }
 }
