@@ -1,6 +1,6 @@
 
 #
-# autoscissors.py replay_pfx program_name scissors_pfx [main_offset main_module_name]
+# autoscissors.py replay_pfx program_name scissors_pfx instr_buffer [main_offset main_module_name]
 #
 # This plugin analyzes a replay to find the instruction count range
 # corresponding to the execution of a program and then generates a new
@@ -12,6 +12,9 @@
 # you want autoscissors to just pull out that part of the replay.
 #
 # scissors_pfx is the prefix of the new replay to create
+#
+# instr_buffer is the number of additional instructions to left and
+# right of the inferred range to add "just in case"
 # 
 # main_offset is hex offset of main in its module
 # 
@@ -25,9 +28,13 @@ from pandare import Panda
 from pandare.plog_reader import PLogReader
 import portion
 
-if (len(sys.argv) < 4):
-    print ("Usage: autoscissors.py replay_pfx program_name scissors_pfx [main_offset main_module_name]")
+
+def usage():
+    print ("Usage: autoscissors.py replay_pfx program_name scissors_pfx instr_buffer [main_offset main_module_name]")
     sys.exit(1)
+
+if (len(sys.argv) < 5):
+    usage()
 
 panda = Panda(generic="x86_64")
 
@@ -39,11 +46,14 @@ mode = None
 replay_pfx = sys.argv[1]
 program_name = sys.argv[2]
 scissors_pfx = sys.argv[3]
-if (len(sys.argv) == 6):
+instr_buffer = int(sys.argv[4])
+if (len(sys.argv) > 5):
+    if (len(sys.argv) < 7):
+        usage()
     # offset of start of main within its module
-    start_of_main = int(sys.argv[4], 16)
+    start_of_main = int(sys.argv[5], 16)
     # name of module containing main
-    module_name_main = sys.argv[5]
+    module_name_main = sys.argv[6]
     mode = START_OF_MAIN
 
 print ("poi name is [%s]" % program_name)
@@ -175,12 +185,10 @@ panda.unload_plugin("collect_code")
 
 print ("\nScissorsing")
 
-buffer_amt = 100
-
 panda.load_plugin("scissors", 
                   args={"name": scissors_pfx,
-                        "start": poi_instr_range.lower - buffer_amt,
-                        "end": poi_instr_range.upper + buffer_amt})
+                        "start": poi_instr_range.lower - instr_buffer,
+                        "end": poi_instr_range.upper + instr_buffer})
 panda.run_replay(replay_pfx)
 
 
