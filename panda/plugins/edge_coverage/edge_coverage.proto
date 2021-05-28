@@ -1,17 +1,26 @@
+message Block {
+    required uint64 pc = 1;
+    required uint32 size = 2;
+}
+
 message Edge { // This will have to be n at some point 
-    repeated uint64 pc = 2;
-    required uint64 hit_count = 3;
+    repeated Block block = 1;
+    required uint64 hit_count = 2;
 }
 
-message AsidEdges {
-    repeated Edge edges = 2; // all the up-to-n edges 
+message ThreadEdges {
+    required uint32 tid = 1;
+    required uint64 create_time = 2;
+    repeated Edge edges = 3; // all the up-to-n edges 
 }
 
-optional AsidEdges edge_coverage = 41;  
+optional ThreadEdges edge_coverage = 41;  
 
 
-message AsidTrace {
-    repeated uint64 pcs = 1; 
+message ThreadTrace {
+    required uint32 tid = 1;
+    required uint64 create_time = 2;
+    repeated uint64 pcs = 3; 
 }   
 
-optional AsidTrace trace = 43;
+optional ThreadTrace trace = 43;
